@@ -18,6 +18,8 @@ import {
 } from '../../src/main.js';
 import { battleFingerprint, officialModuleEntries } from '../helpers.js';
 import { nullAudio } from '../../src/ui/audio/nullAudio.js';
+import { levelFromTotalExp, totalExpForLevel } from '../../src/core/progression.js';
+import { recalcPlayer } from '../../src/core/derived.js';
 import { resetAdapterCache } from '../../src/persistence/storageAdapter.js';
 import { SaveService } from '../../src/persistence/saveService.js';
 import {
@@ -64,7 +66,7 @@ function must(selector) {
   return el;
 }
 /** 等几个宏任务：存档探测与写队列都是异步的（fake-indexeddb 要跨多个 task）。 */
-async function tick(times = 4) {
+async function tick(times = 16) {
   for (let i = 0; i < times; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 const screenEl = (id) => `.screen-host [data-screen="${id}"]`;
@@ -81,6 +83,11 @@ async function startRunViaDialog(app, seedText = null) {
 /** 直接开一局（多数测试关心的是屏幕行为，不是对话框）。 */
 function startRun(app) {
   app.startNewRun(SEED);
+}
+
+/** 按 id 取快照里的节点。 */
+function nodeById(state, id) {
+  return state.mapNodes.find((n) => n.id === id);
 }
 
 /** 找出货架上真的在卖某商品的商店节点（商品按 nodeId 派生，种子固定则恒定）。 */
@@ -567,6 +574,30 @@ describe('存档与设置', () => {
 });
 
 // ============================================================
+// 路由器契约
+// ============================================================
+
+describe('路由器', () => {
+  it('go 到未注册的屏幕直接抛错，而不是静默白屏', () => {
+    startRun(app);
+    expect(() => app.router.go('nope')).toThrow(/未注册的屏幕/);
+    // 抛错后当前屏仍在，不会出现「点了没反应也没提示」
+    expect(visibleScreen()).toBe(SCREEN.MAP);
+  });
+
+  it('back 依返回栈回退，栈空时用 fallback', () => {
+    startRun(app);
+    app.router.go(SCREEN.SETTINGS, { push: true });
+    expect(app.router.back(SCREEN.MAP).current).toBe(SCREEN.MAP);
+
+    app.router.go(SCREEN.CODEX, { push: true });
+    app.router.go(SCREEN.SAVES, { push: true });
+    expect(app.router.back(SCREEN.MAP).current).toBe(SCREEN.CODEX);
+    expect(app.router.back(SCREEN.MAP).current).toBe(SCREEN.MAP);
+  });
+});
+
+// ============================================================
 // 对话框行为（P1-4 回归）
 // ============================================================
 
@@ -598,3 +629,100 @@ describe('对话框', () => {
     expect(dialog.hidden).toBe(true);
   });
 });
+
+// ============================================================
+// 长跑冒烟：连着推 5 层，每层把所有屏幕在有数据的状态下打开一遍
+// ============================================================
+
+describe('多局长跑', () => {
+  /**
+   * 连推 5 层：每层打完所有战斗、用掉休息、解开事件、再把六个局内屏在有数据的
+   * 状态下各打开一次。目标不是「能不能赢」，而是接线在真实数据量下不崩。
+   *
+   * 顺带测到的平衡事实（不改代码，只记录）：1 级合法的默认序列胜率约 38%，
+   * 因为全部 oGCD（含 emergencyHeal）都锁在 79 级以后，开局没有任何防御手段。
+   * 因此这里容忍阵亡重开，并另外把等级顶到 20 级来测「已解锁很多技能」的屏幕。
+   */
+  it('推进 5 层不抛错，高等级下屏幕仍能渲染', async () => {
+    startRun(app);
+    let battles = 0;
+    let descents = 0;
+
+    for (let round = 1; round <= 5; round += 1) {
+      const nodes = app.snapshot().mapNodes;
+      for (const node of nodes.filter((n) => n.type === NODE_TYPE.COMBAT || n.type === NODE_TYPE.ELITE)) {
+        standOn(app, node);
+        app.beginBattle();
+        app.setSpeed(SPEED_MODES.MAX);
+        battles = Math.max(battles, app.snapshot().metadata.battlesWon);
+        if (app.snapshot().status === GAME_STATUS.FINISHED) break;
+      }
+      if (app.snapshot().status === GAME_STATUS.FINISHED) {
+        // 阵亡：结算面板弹出 → 关闭 → 另开一局继续跑屏幕
+        click(must('.dialog-box [data-action="close"]'));
+        await tick();
+        startRun(app);
+        expect(app.snapshot().status).toBe(GAME_STATUS.EXPLORING);
+      }
+
+      for (const node of nodes.filter((n) => n.type === NODE_TYPE.REST)) {
+        standOn(app, node);
+        app.store.update((draft) => {
+          draft.player.hp = Math.max(1, Math.floor(draft.player.maxHp / 2));
+        });
+        app.flow.useRest();
+      }
+      for (const node of nodes.filter((n) => n.type === NODE_TYPE.EVENT)) {
+        standOn(app, node);
+        const event = app.flow.getEvent();
+        if (event !== null) app.flow.resolveEvent(event.id, 0);
+      }
+
+      visitAllScreens();
+      const best = [...app.snapshot().player.inventory].sort((a, b) => b.score - a.score)[0];
+      if (best !== undefined) expect(app.flow.equip(best.id).ok).toBe(true);
+
+      app.router.go(SCREEN.MAP);
+      const floorBefore = app.snapshot().floorNumber;
+      standOn(app, nodeById(app.snapshot(), app.snapshot().exitNodeId));
+      expect(app.flow.descend()).toEqual({ ok: true, floorNumber: floorBefore + 1 });
+      descents += 1;
+    }
+
+    expect(descents).toBe(5);
+
+    // 把等级顶到 20 级：解锁表里出现大量已解锁项，序列屏与图鉴走的另一条分支
+    app.store.update((draft) => {
+      draft.player.exp = totalExpForLevel(20);
+      recalcPlayer(draft.player);
+    });
+    expect(app.snapshot().player.level).toBe(20);
+    visitAllScreens();
+    click(q(`[data-nav="${SCREEN.CODEX}"]`));
+    const unlockedNow = qa(`${screenEl(SCREEN.CODEX)} .codex-item:not(.is-lock)`).length;
+    expect(unlockedNow).toBeGreaterThan(6);
+    expect(textOf(`${screenEl(SCREEN.SEQUENCE)} [data-slot="level-note"]`)).toContain('Lv.');
+
+    // 经验与等级的单一数据源不变量在长跑后仍成立
+    const state = app.snapshot();
+    expect(levelFromTotalExp(state.player.exp)).toBe(state.player.level);
+    expect(state.player.hp).toBeLessThanOrEqual(state.player.maxHp);
+    void battles;
+  }, 30_000);
+});
+
+/** 六个局内屏幕各打开一次并断言渲染出内容。 */
+function visitAllScreens() {
+  for (const target of [
+    SCREEN.MAP,
+    SCREEN.SEQUENCE,
+    SCREEN.EQUIPMENT,
+    SCREEN.CHARACTER,
+    SCREEN.CODEX,
+    SCREEN.HISTORY,
+  ]) {
+    app.router.go(target);
+    expect(q(`[data-screen="${target}"]`).hidden).toBe(false);
+    expect(q(`[data-screen="${target}"]`).innerHTML.length).toBeGreaterThan(40);
+  }
+}

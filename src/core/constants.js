@@ -184,8 +184,19 @@ export const EXP_REWARD = Object.freeze({
 /** 技能解锁：等级门槛的上限（最后一个技能在此级解锁）。 */
 export const SKILL_UNLOCK_MAX_LEVEL = 120;
 
-/** 开局就解锁的技能数（保证 1 级能配出可用序列）。 */
-export const STARTER_SKILL_COUNT = 6;
+/**
+ * 开局（1 级）就解锁的技能数，按类型分名额。
+ *
+ * 为什么分开算：旧版只给「全局前 N 个」，而排序里 GCD 永远排在 oGCD 前，
+ * 于是 30 个 oGCD 全部落在 79~120 级（含唯一自保技）——实测导致 1 级
+ * 合法序列胜率从 90% 砸到 38%，而 oGCD 这套「插入技」作为本作卖点从头到尾
+ * 不存在于玩家视野里。分名额保证 1 级既能打输出也有插入手段。
+ */
+export const STARTER_GCD_COUNT = 6;
+export const STARTER_OGCD_COUNT = 4;
+
+/** 开局解锁的技能总数（两类名额之和，供旧调用方与断言使用）。 */
+export const STARTER_SKILL_COUNT = STARTER_GCD_COUNT + STARTER_OGCD_COUNT;
 
 // ============================================================
 // 装备系统（阶段 8，参考 Fate_echo 的槽位/品质/词缀结构）

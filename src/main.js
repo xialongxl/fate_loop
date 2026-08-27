@@ -71,10 +71,12 @@ const MOVE_DENY = Object.freeze({
 /**
  * 默认开局序列。
  *
- * 必须是 1 级就合法的组合：解锁表按 (类型 → 代价 → id) 排序后只把前
- * STARTER_SKILL_COUNT 个 GCD 放在 1 级，全部 oGCD 都在 79 级以后。
- * 旧版默认序列里的 blade.slash(7) / riposte(6) / cleave(41) 与两个 oGCD
+ * 必须是 1 级就合法的组合。解锁表按类型分名额（前 6 个 GCD + 前 4 个 oGCD
+ * 在 1 级），因此 5 个低代价起手 GCD 加一个自保插入技是合法且可用的开局。
+ * 旧默认里的 blade.slash(7) / riposte(6) / cleave(41) 与 ogcd.emergencyHeal(94)
  * 在 1 级都是非法的 —— 交接文档 P1-2 提醒的正是这件事。
+ *
+ * 改这里之前先看一眼胜率守卫：tests/integration/balance.test.js。
  */
 export const DEFAULT_GCD_SEQUENCE = Object.freeze([
   'blade.jab',
@@ -83,7 +85,11 @@ export const DEFAULT_GCD_SEQUENCE = Object.freeze([
   'frost.shard',
   'shadow.touch',
 ]);
-export const DEFAULT_OGCD_SLOTS = Object.freeze([]);
+export const DEFAULT_OGCD_SLOTS = Object.freeze([
+  // 自保优先：残血时振奋（短冷却自我治疗）抢到最前
+  { skillId: 'ogcd.secondWind', priority: 95 },
+  { skillId: 'ogcd.suddenStrike', priority: 30 },
+]);
 
 /**
  * 装配整个应用。

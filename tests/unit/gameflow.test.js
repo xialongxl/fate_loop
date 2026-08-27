@@ -84,6 +84,21 @@ function neighborOf(state, nodeId) {
   return id === undefined ? null : state.mapNodes.find((n) => n.id === id);
 }
 
+/**
+ * 把玩家放到一个「货架上真的在卖这件商品」的商店节点。
+ * 货架由 (种子, 层, nodeId) 派生，因此这里可以跨层找；找不到就是内容有问题。
+ */
+function gotoShopSelling(g, itemId, { maxFloors = 6 } = {}) {
+  for (let floor = g.st().floorNumber; floor <= maxFloors; floor += 1) {
+    for (const shop of g.of(NODE_TYPE.SHOP)) {
+      g.goto(shop);
+      if (g.flow.getShopOffers().offers.some((o) => o.id === itemId)) return true;
+    }
+    g.flow.enterFloor(floor + 1);
+  }
+  return false;
+}
+
 /** 同步跑完当前战斗。 */
 function settle(h) {
   h.engine.runToEnd();
@@ -511,24 +526,43 @@ describe('商店', () => {
   });
 
   it('恢复类商品立即生效且不超过上限', () => {
-    g.goto(g.first(NODE_TYPE.SHOP));
-    g.flow.getShopOffers();
-    g.store.update((d) => {
-      d.player.hp = 1;
-    });
     g.shards(1000);
 
-    expect(g.flow.purchase('shop.full.restore').ok).toBe(true);
-    expect(g.st().player.hp).toBe(g.st().player.maxHp);
-
+    expect(gotoShopSelling(g, 'shop.full.restore')).toBe(true);
     g.store.update((d) => {
       d.player.hp = 1;
     });
-    g.flow.purchase('shop.heal.small');
+    expect(g.flow.purchase('shop.full.restore')).toEqual({ ok: true });
+    expect(g.st().player.hp).toBe(g.st().player.maxHp);
+
+    expect(gotoShopSelling(g, 'shop.heal.small')).toBe(true);
+    const maxHp = g.st().player.maxHp;
+    g.store.update((d) => {
+      d.player.hp = 1;
+    });
+    expect(g.flow.purchase('shop.heal.small')).toEqual({ ok: true });
     const healed = g.st().player.hp;
     expect(healed).toBeGreaterThan(1);
-    g.flow.purchase('shop.heal.large');
+    expect(healed).toBeLessThanOrEqual(maxHp);
+
+    expect(gotoShopSelling(g, 'shop.heal.large')).toBe(true);
+    expect(g.flow.purchase('shop.heal.large').ok).toBe(true);
     expect(g.st().player.hp).toBeLessThanOrEqual(g.st().player.maxHp);
+  });
+
+  it('只卖货架上的商品：买未上架的直接被拒且不扣碎片', () => {
+    const shop = g.first(NODE_TYPE.SHOP);
+    g.goto(shop);
+    const offers = g.flow.getShopOffers().offers;
+    const onShelf = new Set(offers.map((o) => o.id));
+    const offShelf = [...g.pool.shopItems.keys()].find((id) => !onShelf.has(id));
+    expect(offShelf).toBeDefined();
+    g.shards(1000);
+    const before = g.st().fateShards;
+
+    expect(g.flow.purchase(offShelf)).toEqual({ ok: false, reason: 'notOnShelf' });
+    expect(g.st().fateShards).toBe(before);
+    expect(g.st().player.maxHp).toBe(g.st().player.maxHp);
   });
 
   it('拒绝：重复购买 / 碎片不足 / 未知商品 / 非商店节点 / 未读货架', () => {
@@ -643,8 +677,7 @@ const pickStats = (player) => Object.fromEntries(STAT_FIELDS.map((k) => [k, play
 describe('永久属性提升要能穿过 recalcPlayer', () => {
   /** 购买一件永久属性商品，随后强制触发一次重算。 */
   function buyThenRecalc(itemId, { hp } = {}) {
-    g.goto(g.first(NODE_TYPE.SHOP));
-    g.flow.getShopOffers();
+    expect(gotoShopSelling(g, itemId)).toBe(true);
     g.shards(1000);
     if (hp !== undefined) {
       g.store.update((d) => {
@@ -683,8 +716,7 @@ describe('永久属性提升要能穿过 recalcPlayer', () => {
   });
 
   it('受伤时买加上限商品只补上限，不白送回血（保持缺失量）', () => {
-    g.goto(g.first(NODE_TYPE.SHOP));
-    g.flow.getShopOffers();
+    expect(gotoShopSelling(g, 'shop.stat.maxHp')).toBe(true);
     g.shards(1000);
     const maxBefore = g.st().player.maxHp;
     g.store.update((d) => {
@@ -698,8 +730,7 @@ describe('永久属性提升要能穿过 recalcPlayer', () => {
   });
 
   it('买减上限商品时 hp 被夹到新上限且至少为 1', () => {
-    g.goto(g.first(NODE_TYPE.SHOP));
-    g.flow.getShopOffers();
+    expect(gotoShopSelling(g, 'shop.stat.glass')).toBe(true);
     g.shards(1000);
     const maxBefore = g.st().player.maxHp;
     g.store.update((d) => {
@@ -714,8 +745,7 @@ describe('永久属性提升要能穿过 recalcPlayer', () => {
   });
 
   it('通过真实流程验证：购买 → 打赢一场 → 加成仍在', async () => {
-    g.goto(g.first(NODE_TYPE.SHOP));
-    g.flow.getShopOffers();
+    expect(gotoShopSelling(g, 'shop.stat.maxHp')).toBe(true);
     g.shards(1000);
     const maxBefore = g.st().player.maxHp;
     const atkBefore = g.st().player.attack;
@@ -735,8 +765,7 @@ describe('永久属性提升要能穿过 recalcPlayer', () => {
   });
 
   it('永久属性写入存档并能读档还原', () => {
-    g.goto(g.first(NODE_TYPE.SHOP));
-    g.flow.getShopOffers();
+    expect(gotoShopSelling(g, 'shop.stat.bulwark')).toBe(true);
     g.shards(1000);
     g.flow.purchase('shop.stat.bulwark');
 
@@ -1072,20 +1101,22 @@ describe('restoreRun', () => {
     // 商店进度是「每层重置」的（enterFloor 清空 shopStates），
     // 因此这里在不下层的前提下存读档。
     const h = await boot();
-    const shop = h.first(NODE_TYPE.SHOP);
-    h.goto(shop);
+    expect(gotoShopSelling(h, 'shop.heal.small')).toBe(true);
+    const shop = h.st().currentNodeId; // 辅助函数停在卖这件商品的那个商店上
     h.shards(1000);
-    h.flow.getShopOffers();
-    expect(h.flow.purchase('shop.stat.maxHp')).toEqual({ ok: true });
+    expect(h.flow.purchase('shop.heal.small')).toEqual({ ok: true });
     const save = serializeRun(h.st());
-    expect(save.shopPurchases.map(([id]) => id)).toContain(shop.id);
+    const purchased = (save.shopPurchases.find(([, ids]) => ids.includes('shop.heal.small')) ?? [
+      null,
+    ])[0];
+    expect(purchased).toBe(shop);
 
     const t = await boot({ seed: 5 });
     t.flow.restoreRun(save);
-    t.goto(t.byId(shop.id));
+    t.goto(t.byId(purchased));
     t.shards(10_000);
-    expect(t.flow.getShopOffers().purchasedIds.has('shop.stat.maxHp')).toBe(true);
-    expect(t.flow.purchase('shop.stat.maxHp')).toEqual({ ok: false, reason: 'alreadyPurchased' });
+    expect(t.flow.getShopOffers().purchasedIds.has('shop.heal.small')).toBe(true);
+    expect(t.flow.purchase('shop.heal.small')).toEqual({ ok: false, reason: 'alreadyPurchased' });
   });
 
   it('存档里越界的 hp 被夹到 [1, maxHp]', async () => {

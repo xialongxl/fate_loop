@@ -28,6 +28,7 @@ import {
   NODE_TYPE,
   SCREEN,
   SPEED_MODES,
+  STARTER_SKILL_COUNT,
   WINNER,
 } from '../../src/core/constants.js';
 
@@ -439,7 +440,13 @@ describe('图鉴屏', () => {
   it('默认列出技能，并标注 1 级未解锁项', () => {
     const items = qa(`${screenEl(SCREEN.CODEX)} .codex-item`);
     expect(items.length).toBe(90);
-    expect(qa(`${screenEl(SCREEN.CODEX)} .codex-item.is-lock`).length).toBeGreaterThan(80);
+    // 1 级解锁的名额 = GCD + oGCD 两类 starter 之和，其余全部标锁
+    expect(qa(`${screenEl(SCREEN.CODEX)} .codex-item:not(.is-lock)`).length).toBe(
+      STARTER_SKILL_COUNT,
+    );
+    expect(qa(`${screenEl(SCREEN.CODEX)} .codex-item.is-lock`).length).toBe(
+      90 - STARTER_SKILL_COUNT,
+    );
   });
 
   it('切到怪物页签后逐条渲染，搜索能过滤', () => {

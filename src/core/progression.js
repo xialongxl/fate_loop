@@ -14,8 +14,10 @@ import {
   GROWTH_PER_LEVEL,
   MAX_LEVEL,
   PLAYER_BASE,
+  SKILL_TYPE,
   SKILL_UNLOCK_MAX_LEVEL,
-  STARTER_SKILL_COUNT,
+  STARTER_GCD_COUNT,
+  STARTER_OGCD_COUNT,
 } from './constants.js';
 
 /**
@@ -114,37 +116,55 @@ export function battleExpReward({ monsterCount, floorNumber, isElite }) {
  * 技能解锁等级表。
  *
  * 排序键必须稳定且与内容池的 Map 插入顺序无关，否则同一份内容在不同加载顺序下
- * 会算出不同的解锁等级。这里用 (type, gcdCost/cooldown, id) 三级排序：
- * GCD 先于 oGCD，同类内「代价低者先解锁」，代价相同按 id 字典序。
+ * 会算出不同的解锁等级。每类内部用 (代价, id) 二级排序：GCD 看 gcdCostMs、
+ * oGCD 看 cooldownMs，代价相同按 id 字典序 —— 「代价低者先解锁」。
  *
- * 前 STARTER_SKILL_COUNT 个固定为 1 级，其余在 [2, SKILL_UNLOCK_MAX_LEVEL] 上均匀铺开。
+ * 名额按类型分开（STARTER_GCD_COUNT / STARTER_OGCD_COUNT）：前若干名落在 1 级，
+ * 其余在同类型内在 [2, SKILL_UNLOCK_MAX_LEVEL] 上均匀铺开。
+ * 不混类排（曾经混类排）：那会把全部 oGCD 顶到 79 级之后。
+ *
+ * 类型不认识的技能（模组乱填）一律 1 级可用 —— 未知不限制，宁放不拦。
  *
  * @param {Map<string, object>} skills 内容池技能表
  * @returns {Map<string, number>} skillId → 解锁等级
  */
 export function buildUnlockTable(skills) {
-  const sorted = [...skills.values()].sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'GCD' ? -1 : 1;
-    const costA = a.type === 'GCD' ? a.gcdCostMs : a.cooldownMs;
-    const costB = b.type === 'GCD' ? b.gcdCostMs : b.cooldownMs;
-    if (costA !== costB) return costA - costB;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  });
-
   const table = new Map();
-  const gated = Math.max(0, sorted.length - STARTER_SKILL_COUNT);
-  const span = SKILL_UNLOCK_MAX_LEVEL - 1;
+  const all = [...skills.values()];
 
-  sorted.forEach((skill, index) => {
-    if (index < STARTER_SKILL_COUNT) {
-      table.set(skill.id, 1);
-      return;
-    }
-    // 第 i 个受限技能落在 2 .. SKILL_UNLOCK_MAX_LEVEL 上
-    const i = index - STARTER_SKILL_COUNT + 1;
-    const level = gated <= 1 ? SKILL_UNLOCK_MAX_LEVEL : 1 + Math.ceil((i * span) / gated);
-    table.set(skill.id, Math.min(SKILL_UNLOCK_MAX_LEVEL, Math.max(2, level)));
-  });
+  const buckets = [
+    { type: SKILL_TYPE.GCD, starter: STARTER_GCD_COUNT, cost: (s) => s.gcdCostMs ?? 0 },
+    { type: SKILL_TYPE.OGCD, starter: STARTER_OGCD_COUNT, cost: (s) => s.cooldownMs ?? 0 },
+  ];
+
+  const claimed = new Set();
+  for (const { type, starter, cost } of buckets) {
+    const list = all
+      .filter((skill) => skill.type === type && !claimed.has(skill.id))
+      .sort((a, b) => {
+        if (cost(a) !== cost(b)) return cost(a) - cost(b);
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      });
+    for (const skill of list) claimed.add(skill.id);
+
+    const gated = Math.max(0, list.length - starter);
+    const span = SKILL_UNLOCK_MAX_LEVEL - 1;
+    list.forEach((skill, index) => {
+      if (index < starter) {
+        table.set(skill.id, 1);
+        return;
+      }
+      // 第 i 个受限技能落在 2 .. SKILL_UNLOCK_MAX_LEVEL 上
+      const i = index - starter + 1;
+      const level = gated <= 1 ? SKILL_UNLOCK_MAX_LEVEL : 1 + Math.ceil((i * span) / gated);
+      table.set(skill.id, Math.min(SKILL_UNLOCK_MAX_LEVEL, Math.max(2, level)));
+    });
+  }
+
+  // 未知类型（模组写错 type）不设门槛：拦了会在战斗里造成永久空转
+  for (const skill of all) {
+    if (!claimed.has(skill.id)) table.set(skill.id, 1);
+  }
 
   return table;
 }

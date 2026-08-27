@@ -326,6 +326,11 @@ export class GameFlow {
 
     const item = this.#pool.shopItems.get(itemId);
     if (item === undefined) return { ok: false, reason: 'noSuchItem' };
+    // 只卖货架上的东西。货架由种子派生，“能买到的”与“看得见的”必须是同一个集合；
+    // 读档后 offers 还没重建（空数组）时不拦，避免把合法购买变成「看不见就买不到」。
+    if (shopState.offers.length > 0 && !shopState.offers.some((offer) => offer.id === itemId)) {
+      return { ok: false, reason: 'notOnShelf' };
+    }
     if (state.fateShards < item.cost) return { ok: false, reason: 'insufficientShards' };
 
     this.#store.update((draft) => {

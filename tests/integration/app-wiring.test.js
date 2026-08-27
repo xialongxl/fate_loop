@@ -125,7 +125,7 @@ describe('外壳启动', () => {
   });
 
   it('存储后端被报告出来', () => {
-    expect(textOf('[data-field="storage"]')).toMatch(/存档：/);
+    expect(textOf('[data-field="storage"]')).toMatch(/存档后端：(indexeddb|localstorage|memory)/);
   });
 
   it('无自动存档时「继续游戏」禁用而不是藏起来', async () => {
@@ -536,6 +536,15 @@ describe('存档与设置', () => {
     await tick();
     expect(h.snapshot().floorNumber).toBe(2);
     expect(h.snapshot().status).toBe(GAME_STATUS.EXPLORING);
+  });
+
+  it('设置屏显示存档后端信息（setStorageInfo 必须有调用方）', async () => {
+    click(must('[data-action="settings"]'));
+    await tick(2);
+    const note = q(`${screenEl(SCREEN.SETTINGS)} [data-slot="storage"]`);
+    expect(note.textContent).toContain('存档后端');
+    // 局外界面不该留一排空的 chip
+    expect(q('.app-shell').className).not.toContain('is-in-run');
   });
 
   it('设置：静音开关立即生效并落盘', async () => {

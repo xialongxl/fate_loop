@@ -7,6 +7,9 @@
   --text-dim: #8b949e;
   --accent: #58a6ff;
   --accent-dim: #1f6feb;
+  /* 主按钮底色：--accent-dim 配浅灰文字只有 3.4:1，不过 WCAG AA。
+     #175abf 配纯白 6.5:1，悬停回落到 --accent-dim 仍有 4.6:1。 */
+  --accent-press: #175abf;
   --danger: #f85149;
   --success: #3fb950;
   --warn: #d29922;
@@ -418,7 +421,7 @@ body {
 }
 
 .map-node.is-current .node-body {
-  fill: var(--accent-dim);
+  fill: var(--accent-press);
   stroke: #a5d6ff;
   stroke-width: 3;
   stroke-dasharray: none;
@@ -480,12 +483,15 @@ button:focus-visible {
 }
 
 .btn-primary {
-  background: var(--accent-dim);
+  background: var(--accent-press);
   border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #388bfd;
+  background: var(--accent-dim);
+  border-color: #7cc0ff;
 }
 
 input, select {
@@ -1256,8 +1262,9 @@ code {
 }
 
 .speed-btn.is-active {
-  background: var(--accent-dim);
+  background: var(--accent-press);
   border-color: var(--accent);
+  color: #fff;
 }
 
 .battle-body {
@@ -1653,9 +1660,9 @@ code {
 }
 
 .filter-btn.is-active {
-  background: var(--accent-dim);
+  background: var(--accent-press);
   border-color: var(--accent);
-  color: var(--text);
+  color: #fff;
 }
 
 .skill-library {
@@ -2278,7 +2285,8 @@ code {
 }
 
 .app-shell:not(.is-in-run) .header-stats {
-  opacity: 0.55;
+  /* 局外界面没有等级/生命可显示，整条收起而不是留一排空 chip */
+  display: none;
 }
 
 .seq-item.is-locked,

@@ -756,9 +756,14 @@ export async function createApp({
   }
 
   // ---- 启动：主菜单 ----
-  shell.fields.storage.textContent = storageInfo.degraded
-    ? `存档：${storageInfo.kind}（降级，可能被清理）`
-    : `存档：${storageInfo.kind}`;
+  const storageLabel = storageInfo.degraded
+    ? `存档后端：${storageInfo.kind}（降级，可能被浏览器清理）`
+    : `存档后端：${storageInfo.kind}`;
+  shell.fields.storage.textContent = storageLabel;
+  // 设置屏自己也要知道降级情况：它在页尾显示一行数据去向
+  screens[SCREEN.SETTINGS].setStorageInfo?.(
+    `${storageLabel} · 历史战绩保留最近 50 条`,
+  );
   if (!Object.values(SPEED_MODES).includes(settings.defaultSpeed)) {
     settings = { ...settings, defaultSpeed: SPEED_MODES.X1 };
   }

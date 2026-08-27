@@ -1,7 +1,7 @@
 /**
  * 初始状态构造（规格 5.1，阶段 8 扩展成长与装备）。
  *
- * 玩家属性的单一数据源是 (exp, equipment, seedBonus)：createPlayer 只负责
+ * 玩家属性的单一数据源是 (exp, equipment, seedBonus, permanentBonus)：createPlayer 只负责
  * 定义 seedBonus 与初始装备，最终面板由 derived.js#recalcPlayer 算出。
  * 这样调整成长曲线时不需要迁移存档，重算即可。
  *
@@ -13,7 +13,7 @@ import { FACTION, GAME_STATUS } from './constants.js';
 import { playerStream } from './prng.js';
 import { createEntity } from './entity.js';
 import { createEmptyEquipment } from './equipment.js';
-import { recalcPlayer } from './derived.js';
+import { emptyPermanentBonus, recalcPlayer } from './derived.js';
 
 /**
  * 玩家初始构造。
@@ -44,6 +44,8 @@ export function createPlayer(seed, { gcdSequence = [], ogcdSlots = [], exp = 0, 
   player.exp = exp;
   player.level = 1;
   player.seedBonus = seedBonus;
+  /** 永久加成（商店/事件给予）。与 seedBonus 同级参与派生，否则会被 recalc 抹掉。 */
+  player.permanentBonus = emptyPermanentBonus();
   player.equipment = equipment ?? createEmptyEquipment();
   /** 背包：未穿戴的装备。 */
   player.inventory = [];

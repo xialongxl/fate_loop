@@ -8,7 +8,8 @@
 import { MAX_LEVEL } from '../../core/constants.js';
 import { baseStatsAtLevel, expProgress, expToNextLevel } from '../../core/progression.js';
 import { totalEquipmentStats } from '../../core/equipment.js';
-import { formatNumber, formatPercent } from '../format.js';
+import { permanentBonusOf } from '../../core/derived.js';
+import { formatNumber, formatPercent, formatSigned } from '../format.js';
 export function createCharacterScreen({ getState }) {
   const element = document.createElement('section');
   element.className = 'screen-character';
@@ -29,7 +30,7 @@ export function createCharacterScreen({ getState }) {
         <table class="breakdown-table">
           <caption class="visually-hidden">属性来源拆解</caption>
           <thead>
-            <tr><th scope="col">属性</th><th scope="col">等级基础</th><th scope="col">装备</th><th scope="col">种子浮动</th><th scope="col">合计</th></tr>
+            <tr><th scope="col">属性</th><th scope="col">等级基础</th><th scope="col">装备</th><th scope="col">种子浮动</th><th scope="col">永久加成</th><th scope="col">合计</th></tr>
           </thead>
           <tbody data-slot="breakdown"></tbody>
         </table>
@@ -66,6 +67,7 @@ export function createCharacterScreen({ getState }) {
     const base = baseStatsAtLevel(progress.level);
     const gear = totalEquipmentStats(player.equipment);
     const bonus = player.seedBonus ?? { maxHp: 0, attack: 0, defense: 0 };
+    const perm = permanentBonusOf(player);
 
     slots.headNote.textContent = `种子 ${state.seed} · 第 ${state.floorNumber} 层`;
 
@@ -88,9 +90,9 @@ export function createCharacterScreen({ getState }) {
     `;
 
     const rows = [
-      { label: '最大生命', base: base.maxHp, gear: gear.maxHp, bonus: bonus.maxHp, total: player.maxHp },
-      { label: '攻击力', base: base.attack, gear: gear.attack, bonus: bonus.attack, total: player.attack },
-      { label: '防御力', base: base.defense, gear: gear.defense, bonus: bonus.defense, total: player.defense },
+      { label: '最大生命', base: base.maxHp, gear: gear.maxHp, bonus: bonus.maxHp, perm: perm.maxHp, total: player.maxHp },
+      { label: '攻击力', base: base.attack, gear: gear.attack, bonus: bonus.attack, perm: perm.attack, total: player.attack },
+      { label: '防御力', base: base.defense, gear: gear.defense, bonus: bonus.defense, perm: perm.defense, total: player.defense },
     ];
 
     slots.breakdown.innerHTML = `
@@ -100,8 +102,9 @@ export function createCharacterScreen({ getState }) {
         <tr>
           <th scope="row">${row.label}</th>
           <td>${formatNumber(row.base)}</td>
-          <td>${row.gear > 0 ? `+${formatNumber(row.gear)}` : '—'}</td>
-          <td>${row.bonus > 0 ? `+${formatNumber(row.bonus)}` : '—'}</td>
+          <td>${formatSigned(row.gear)}</td>
+          <td>${formatSigned(row.bonus)}</td>
+          <td>${formatSigned(row.perm)}</td>
           <td><strong>${formatNumber(row.total)}</strong></td>
         </tr>`,
         )
@@ -111,6 +114,7 @@ export function createCharacterScreen({ getState }) {
         <td>${formatPercent(base.critChance)}</td>
         <td>${gear.crit > 0 ? `+${(gear.crit / 10).toFixed(1)}%` : '—'}</td>
         <td>—</td>
+        <td>${perm.crit > 0 ? `+${(perm.crit / 10).toFixed(1)}%` : '—'}</td>
         <td><strong>${formatPercent(player.critChance ?? 0)}</strong></td>
       </tr>
     `;

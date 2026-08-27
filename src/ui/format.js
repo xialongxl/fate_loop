@@ -45,6 +45,16 @@ export function formatPercent(ratio, digits = 1) {
 }
 
 /**
+ * 带符号的增量。零值用全角破折号占位，避免面板被一排“+0”刷屏。与 formatNumber 同一千分位。
+ * 加成项可为负（如“狂徒之刃”以生命上限换攻击），所以不能一律当作非负处理。
+ */
+export function formatSigned(value) {
+  const n = Math.trunc(Number(value ?? 0));
+  if (n === 0) return '—';
+  return n > 0 ? `+${formatNumber(n)}` : `-${formatNumber(Math.abs(n))}`;
+}
+
+/**
  * Toast 提示。用于「碎片不足」「背包已满」这类轻量反馈。
  * 同一时刻只显示一条，新的直接覆盖 —— 排队显示会让快速连点变成烦人的队列。
  */

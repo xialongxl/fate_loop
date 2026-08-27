@@ -1060,7 +1060,6 @@ describe('restoreRun', () => {
     const signature = (state) => state.mapNodes.map((n) => `${n.id}:${n.type}:${n.gridX},${n.gridY}`);
     expect(signature(t.st())).toEqual(signature(ref.st()));
 
-    const s = t.st();
     for (const id of save.visitedNodeIds) {
       expect(t.byId(id).isRevealed).toBe(true);
     }

@@ -20,8 +20,8 @@ import {
   totalEquipmentStats,
 } from '../../src/core/equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from '../../src/core/loot.js';
-import { derivePlayerStats, recalcPlayer } from '../../src/core/derived.js';
-import { EQUIP_SLOTS, ENHANCE_MAX, RARITIES } from '../../src/core/constants.js';
+import { derivePlayerStats, addPermanentBonus, permanentBonusOf, recalcPlayer } from '../../src/core/derived.js';
+import { EQUIP_SLOTS, ENHANCE_MAX, GROWTH_PER_LEVEL, RARITIES } from '../../src/core/constants.js';
 import { createPlayer } from '../../src/core/initialState.js';
 import { totalExpForLevel } from '../../src/core/progression.js';
 
@@ -316,6 +316,71 @@ describe('派生属性', () => {
     expect(Number.isInteger(player.maxHp)).toBe(true);
     expect(Number.isInteger(player.attack)).toBe(true);
     expect(Number.isInteger(player.defense)).toBe(true);
+  });
+});
+
+describe('永久加成（permanentBonus）', () => {
+  it('createPlayer 给出全零的 permanentBonus', () => {
+    expect(createPlayer(42).permanentBonus).toEqual({ maxHp: 0, attack: 0, defense: 0, crit: 0 });
+  });
+
+  it('addPermanentBonus 累加、支持负值，并忽略未知字段', () => {
+    const player = createPlayer(42);
+    addPermanentBonus(player, { maxHp: 60 });
+    addPermanentBonus(player, { maxHp: -40, attack: 16, haste: 99 });
+    expect(player.permanentBonus).toMatchObject({ maxHp: 20, attack: 16, defense: 0 });
+  });
+
+  it('permanentBonusOf 对缺失/非法字段兜底为整数 0', () => {
+    expect(permanentBonusOf({})).toEqual({ maxHp: 0, attack: 0, defense: 0, crit: 0 });
+    expect(permanentBonusOf(null)).toEqual({ maxHp: 0, attack: 0, defense: 0, crit: 0 });
+    expect(permanentBonusOf({ permanentBonus: { maxHp: NaN, attack: 3.7 } }).maxHp).toBe(0);
+    expect(permanentBonusOf({ permanentBonus: { attack: 3.7 } }).attack).toBe(3);
+  });
+
+  it('derivePlayerStats 把永久加成计入四项派生值', () => {
+    const equipment = createEmptyEquipment();
+    const plain = derivePlayerStats({ exp: 0, equipment });
+    const boosted = derivePlayerStats({
+      exp: 0,
+      equipment,
+      permanentBonus: { maxHp: 100, attack: 10, defense: 5, crit: 20 },
+    });
+    expect(boosted.maxHp).toBe(plain.maxHp + 100);
+    expect(boosted.attack).toBe(plain.attack + 10);
+    expect(boosted.defense).toBe(plain.defense + 5);
+    expect(boosted.critChance).toBeCloseTo(plain.critChance + 0.02, 10);
+  });
+
+  it('永久加成的负值不会把面板压到非法区间', () => {
+    const player = createPlayer(42);
+    addPermanentBonus(player, { maxHp: -99999, attack: -99999, defense: -99999 });
+    recalcPlayer(player);
+    expect(player.maxHp).toBeGreaterThanOrEqual(1);
+    expect(player.attack).toBeGreaterThanOrEqual(0);
+    expect(player.defense).toBeGreaterThanOrEqual(0);
+    expect(player.hp).toBeGreaterThanOrEqual(1);
+  });
+
+  it('recalcPlayer 幂等：重复重算不漂移（商店连续重算与读档都依赖这一点）', () => {
+    const player = createPlayer(42);
+    addPermanentBonus(player, { maxHp: 60, attack: 8 });
+    recalcPlayer(player);
+    const first = { maxHp: player.maxHp, attack: player.attack, hp: player.hp, level: player.level };
+    for (let i = 0; i < 5; i += 1) recalcPlayer(player);
+    expect({ maxHp: player.maxHp, attack: player.attack, hp: player.hp, level: player.level }).toEqual(first);
+  });
+
+  it('升级与永久加成互不干扰：两者都能存活', () => {
+    const player = createPlayer(42);
+    addPermanentBonus(player, { maxHp: 60 });
+    recalcPlayer(player);
+    const withBonus = player.maxHp;
+
+    player.exp = totalExpForLevel(10);
+    recalcPlayer(player);
+    expect(player.maxHp).toBe(withBonus + 9 * GROWTH_PER_LEVEL.maxHp);
+    expect(player.permanentBonus.maxHp).toBe(60);
   });
 });
 

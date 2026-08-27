@@ -7,11 +7,15 @@
  *   - 新增槽位概念：3 个手动槽 + 1 个自动槽，key 为 `run:<slotId>`
  *   - 玩家属性（maxHp/attack/defense）不再入存档，读档时由 recalcPlayer 重算
  *
+ * v2 内部追加的可选字段 permanentBonus（永久加成）：旧 v2 存档没有它时按全零补齐，
+ * 语义恰好正确 —— 那时还没有任何能穿过重算的永久加成，因此不升 schema 版本。
+ *
  * 只存探索层信息，不存战斗中间态（规格 11.2）—— 战斗输即死，中间态无保存价值。
  * Set 转已排序数组，保证同一逻辑状态序列化出的字节完全一致。
  */
 
 import { AUTO_SAVE_SLOT, MANUAL_SAVE_SLOTS, SCHEMA_VERSION } from '../core/constants.js';
+import { permanentBonusOf } from '../core/derived.js';
 import { setToArray } from '../utils/serialize.js';
 import { FateError } from '../utils/invariant.js';
 
@@ -81,6 +85,8 @@ export function serializeRun(state) {
     exp: state.player.exp,
     playerHp: state.player.hp,
     seedBonus: { ...state.player.seedBonus },
+    // 永久加成（商店/事件）：不存就会被 recalcPlayer 抹掉，见 derived.js
+    permanentBonus: permanentBonusOf(state.player),
 
     gcdSequence: [...state.player.gcdSequence],
     ogcdSlots: state.player.ogcdSlots.map((s) => ({ skillId: s.skillId, priority: s.priority })),

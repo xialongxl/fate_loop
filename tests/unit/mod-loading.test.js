@@ -506,6 +506,25 @@ describe('官方模组集成加载', () => {
     expect(pool.events.size).toBeGreaterThan(0);
   });
 
+  it('官方内容不手写派生属性（不变量 4：永久加成走 permanentBonus）', async () => {
+    const pool = await loadOfficialPool();
+    // maxHp / attack / defense / critChance 是 recalcPlayer 的产物，直接赋值等于写空气：
+    // 下一次重算就消失。旧版商店的六个 upgrade 商品与部分事件就踩了这个坑。
+    const writesDerived = (fn) =>
+      /state\.player\.(maxHp|attack|defense|critChance)\s*(\+=|-=|\*=|=(?!=))/.test(fn.toString());
+
+    const offenders = [];
+    for (const item of pool.shopItems.values()) {
+      if (writesDerived(item.apply)) offenders.push(item.id);
+    }
+    for (const event of pool.events.values()) {
+      event.choices.forEach((choice, index) => {
+        if (writesDerived(choice.apply)) offenders.push(`${event.id}[${index}]`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('遭遇分档为 60 普通 + 40 精英', async () => {
     const pool = await loadOfficialPool();
     const encounters = [...pool.encounters.values()];

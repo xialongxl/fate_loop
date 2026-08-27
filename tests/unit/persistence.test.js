@@ -30,7 +30,7 @@ import { createHarness } from '../helpers.js';
 import { totalExpForLevel } from '../../src/core/progression.js';
 import { rollEquipment } from '../../src/core/equipment.js';
 import { mulberry32 } from '../../src/core/prng.js';
-import { recalcPlayer } from '../../src/core/derived.js';
+import { addPermanentBonus, recalcPlayer } from '../../src/core/derived.js';
 
 /** 等待写队列落盘。SaveService 用 setTimeout(0) 调度 flush。 */
 async function drain(service) {
@@ -465,6 +465,43 @@ describe('存档往返：restoreRun', () => {
     const state = fresh.store.unsafeGetState();
     expect(state.player.hp).toBeLessThanOrEqual(state.player.maxHp);
     expect(state.player.hp).toBeGreaterThanOrEqual(1);
+  });
+
+  it('永久加成随存档往返，不靠重算丢失', async () => {
+    const harness = await createHarness({ seed: 31337 });
+    harness.flow.enterFloor(2);
+    harness.store.update((draft) => {
+      addPermanentBonus(draft.player, { maxHp: 100, attack: -4, defense: 6 });
+      recalcPlayer(draft.player);
+    });
+    const before = harness.store.getSnapshot();
+
+    const save = serializeRun(harness.store.unsafeGetState());
+    expect(save.permanentBonus).toEqual({ maxHp: 100, attack: -4, defense: 6, crit: 0 });
+
+    const fresh = await createHarness({ seed: 1 });
+    fresh.flow.restoreRun(save);
+    const after = fresh.store.unsafeGetState();
+    expect(after.player.permanentBonus).toEqual(save.permanentBonus);
+    expect(after.player.maxHp).toBe(before.player.maxHp);
+    expect(after.player.attack).toBe(before.player.attack);
+    expect(after.player.defense).toBe(before.player.defense);
+  });
+
+  it('缺 permanentBonus 的旧 v2 存档仍可读，按全零处理', async () => {
+    const harness = await createHarness({ seed: 4242 });
+    harness.flow.enterFloor(1);
+    const save = serializeRun(harness.store.unsafeGetState());
+    delete save.permanentBonus;
+
+    const fresh = await createHarness({ seed: 9 });
+    expect(() => fresh.flow.restoreRun(save)).not.toThrow();
+    expect(fresh.store.unsafeGetState().player.permanentBonus).toEqual({
+      maxHp: 0,
+      attack: 0,
+      defense: 0,
+      crit: 0,
+    });
   });
 
   it('读档恢复商店已购记录，且商品列表由种子重建', async () => {

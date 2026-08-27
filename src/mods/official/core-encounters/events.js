@@ -3,7 +3,12 @@
  *
  * 事件在探索模式触发，choices[].apply(state) 直接修改探索状态。
  * 设计原则：每个事件都是"取舍"而非纯赠礼，让 8% 的事件节点有决策价值。
+ *
+ * 与商店商品同一条约束：永久属性走 addPermanentBonus，不行写派生值。
+ * GameFlow#resolveEvent 会在 apply 后统一 recalcPlayer。
  */
+
+import { addPermanentBonus, recalcPlayer } from '../../../core/derived.js';
 
 export const OFFICIAL_EVENTS = [
   {
@@ -57,7 +62,10 @@ export const OFFICIAL_EVENTS = [
         label: '饮下井水',
         description: '永久提升 40 生命上限，但失去 10% 当前生命。',
         apply(state) {
-          state.player.maxHp += 40;
+          addPermanentBonus(state.player, { maxHp: 40 });
+          // 先重算再扣血：recalcPlayer 会「保持缺失量」，若先扣血再重算，
+          // 上限增量会被当成缺口回填给 hp，本项取舍就变成净收益了。
+          recalcPlayer(state.player);
           state.player.hp = Math.max(1, state.player.hp - Math.floor(state.player.hp * 0.1));
         },
       },
@@ -67,7 +75,7 @@ export const OFFICIAL_EVENTS = [
         apply(state) {
           if (state.fateShards >= 20) {
             state.fateShards -= 20;
-            state.player.attack += 6;
+            addPermanentBonus(state.player, { attack: 6 });
           }
         },
       },
@@ -84,8 +92,7 @@ export const OFFICIAL_EVENTS = [
         label: '研读战术',
         description: '永久提升 5 点攻击与 3 点防御。',
         apply(state) {
-          state.player.attack += 5;
-          state.player.defense += 3;
+          addPermanentBonus(state.player, { attack: 5, defense: 3 });
         },
       },
       {
@@ -119,7 +126,7 @@ export const OFFICIAL_EVENTS = [
         description: '恢复 20% 生命，但失去 5 点防御。',
         apply(state) {
           state.player.hp = Math.min(state.player.maxHp, state.player.hp + Math.floor(state.player.maxHp * 0.2));
-          state.player.defense = Math.max(0, state.player.defense - 5);
+          addPermanentBonus(state.player, { defense: -5 });
         },
       },
     ],

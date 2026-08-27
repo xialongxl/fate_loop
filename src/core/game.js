@@ -20,7 +20,7 @@ import { areAdjacent } from './map/adjacency.js';
 import { revealAround, revealInitial } from './map/reveal.js';
 import { encounterStream } from './prng.js';
 import { battleExpReward, levelFromTotalExp } from './progression.js';
-import { recalcPlayer } from './derived.js';
+import { recalcPlayer, permanentBonusOf } from './derived.js';
 import { createEmptyEquipment, enhanceGear, salvageValue } from './equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from './loot.js';
 import { pushLog } from '../contracts/defaults/log.js';
@@ -331,6 +331,8 @@ export class GameFlow {
     this.#store.update((draft) => {
       draft.fateShards -= item.cost;
       item.apply(draft);
+      // 永久属性走 permanentBonus，这里统一重算才能立刻反映到面板（P0-3）
+      recalcPlayer(draft.player);
       draft.shopStates.get(node.id).purchasedIds.add(itemId);
       pushLog(draft, `购买了${item.name}（-${item.cost} 碎片）`);
     });
@@ -367,7 +369,8 @@ export class GameFlow {
         node.isCleared = true;
         draft.clearedNodeIds.add(node.id);
       }
-      draft.player.hp = Math.min(draft.player.hp, draft.player.maxHp);
+      // recalcPlayer 顺手把 hp 夹回 [1, maxHp]，无需再手写 clamp
+      recalcPlayer(draft.player);
       pushLog(draft, `事件「${event.name}」：${choice.label}`);
     });
 
@@ -382,12 +385,15 @@ export class GameFlow {
       return { ok: false, reason: 'notAtExit' };
     }
 
+    // 先把目标层数算下来：unsafeGetState() 返回的是活对象，enterFloor 会就地改它。
+    // 若在 return 里再读 state.floorNumber，就会拿到改写后的值（+2）。
+    const nextFloor = state.floorNumber + 1;
     this.#store.update((draft) => {
       draft.metadata.floorsCleared += 1;
     });
     this.#audio?.play('map.floorDown', {});
-    this.enterFloor(state.floorNumber + 1);
-    return { ok: true, floorNumber: state.floorNumber + 1 };
+    this.enterFloor(nextFloor);
+    return { ok: true, floorNumber: nextFloor };
   }
 
   /** 当前节点对象。 */
@@ -420,6 +426,8 @@ export class GameFlow {
       // 成长与装备：exp 是等级的唯一真相源，写完统一 recalc
       draft.player.exp = run.exp ?? 0;
       if (run.seedBonus !== undefined) draft.player.seedBonus = { ...run.seedBonus };
+      // permanentBonus 是 v2 存档的可选字段：旧档缺它时保持全零（当时本就没有可存活的永久加成）
+      draft.player.permanentBonus = permanentBonusOf({ permanentBonus: run.permanentBonus });
       draft.player.equipment = { ...createEmptyEquipment(), ...(run.equipment ?? {}) };
       draft.player.inventory = [...(run.inventory ?? [])];
       draft.player.gcdSequence = [...(run.gcdSequence ?? [])];

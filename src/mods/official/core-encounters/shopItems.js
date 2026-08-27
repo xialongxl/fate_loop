@@ -2,8 +2,15 @@
  * 官方商店商品（决定 A）。
  *
  * apply(state) 直接修改探索状态 —— 商店发生在探索模式，不在战斗中，因此
- * 不经过战斗契约。引擎负责扣除命运碎片，商品只负责施加效果。
+ * 不经过战斗契约。引擎负责扣除命运碎片、并在 apply 后统一 recalcPlayer，
+ * 商品只负责施加效果。
+ *
+ * 重要：maxHp / attack / defense / critChance 是派生值，写它们等于写空气
+ * （下一次 recalc 就没了）。「永久提升」必须走 addPermanentBonus。
+ * hp 不是派生值，可以直接写，但 recalc 会保持「缺失量」，因此加上限自然回血。
  */
+
+import { addPermanentBonus } from '../../../core/derived.js';
 
 export const OFFICIAL_SHOP_ITEMS = [
   {
@@ -36,8 +43,7 @@ export const OFFICIAL_SHOP_ITEMS = [
     kind: 'upgrade',
     weight: 14,
     apply(state) {
-      state.player.maxHp += 60;
-      state.player.hp += 60;
+      addPermanentBonus(state.player, { maxHp: 60 });
     },
   },
   {
@@ -48,7 +54,7 @@ export const OFFICIAL_SHOP_ITEMS = [
     kind: 'upgrade',
     weight: 14,
     apply(state) {
-      state.player.attack += 8;
+      addPermanentBonus(state.player, { attack: 8 });
     },
   },
   {
@@ -59,7 +65,7 @@ export const OFFICIAL_SHOP_ITEMS = [
     kind: 'upgrade',
     weight: 13,
     apply(state) {
-      state.player.defense += 4;
+      addPermanentBonus(state.player, { defense: 4 });
     },
   },
   {
@@ -70,10 +76,7 @@ export const OFFICIAL_SHOP_ITEMS = [
     kind: 'upgrade',
     weight: 10,
     apply(state) {
-      state.player.maxHp += 30;
-      state.player.hp += 30;
-      state.player.attack += 4;
-      state.player.defense += 2;
+      addPermanentBonus(state.player, { maxHp: 30, attack: 4, defense: 2 });
     },
   },
   {
@@ -84,9 +87,7 @@ export const OFFICIAL_SHOP_ITEMS = [
     kind: 'upgrade',
     weight: 8,
     apply(state) {
-      state.player.attack += 16;
-      state.player.maxHp = Math.max(50, state.player.maxHp - 40);
-      state.player.hp = Math.min(state.player.hp, state.player.maxHp);
+      addPermanentBonus(state.player, { attack: 16, maxHp: -40 });
     },
   },
   {
@@ -97,10 +98,7 @@ export const OFFICIAL_SHOP_ITEMS = [
     kind: 'upgrade',
     weight: 8,
     apply(state) {
-      state.player.maxHp += 100;
-      state.player.hp += 100;
-      state.player.defense += 6;
-      state.player.attack = Math.max(1, state.player.attack - 4);
+      addPermanentBonus(state.player, { maxHp: 100, defense: 6, attack: -4 });
     },
   },
   {

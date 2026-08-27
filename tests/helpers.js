@@ -57,16 +57,21 @@ export async function loadOfficialPool() {
   return pool;
 }
 
+/**
+ * 测试用开局序列。**必须全部是 1 级解锁的技能**：GameFlow.startBattle 会调
+ * sanitizeSequence 把未解锁项踢出去，用高级技能当测试默认值会让"测的行为"
+ * 悄悄变成"被清洗后剩下的那一两个技能"，白测。
+ */
 export const TEST_GCD_SEQUENCE = [
   'blade.jab',
-  'blade.slash',
-  'blade.riposte',
-  'blade.momentumStrike',
-  'blade.cleave',
+  'blade.disarm',
+  'fire.spark',
+  'frost.shard',
+  'shadow.touch',
 ];
 
 export const TEST_OGCD_SLOTS = [
-  { skillId: 'ogcd.emergencyHeal', priority: 95 },
+  { skillId: 'ogcd.secondWind', priority: 95 },
   { skillId: 'ogcd.suddenStrike', priority: 30 },
 ];
 

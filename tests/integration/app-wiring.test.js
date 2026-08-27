@@ -742,3 +742,189 @@ function visitAllScreens() {
     expect(q(`[data-screen="${target}"]`).innerHTML.length).toBeGreaterThan(40);
   }
 }
+
+// ============================================================
+// 暂停（P1-5：GAME_STATUS.PAUSED 真的被写入）
+// ============================================================
+
+describe('暂停与恢复', () => {
+  /** 进战斗并跑几帧。断言仍在战斗中，免得测试在"已结束"的状态上验暂停。 */
+  function toBattle() {
+    startRun(app);
+    const node = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.COMBAT);
+    standOn(app, node);
+    app.beginBattle();
+    for (let i = 0; i < 5; i += 1) app.engine.runFrame(SPEED_MODES.X1);
+    expect(app.snapshot().status).toBe(GAME_STATUS.BATTLING);
+    return app.snapshot().virtualTime;
+  }
+
+  it('setSpeed(paused) 写入 PAUSED 状态并冻住虚拟时间', () => {
+    toBattle();
+    app.setSpeed(SPEED_MODES.PAUSED);
+
+    expect(app.snapshot().status).toBe(GAME_STATUS.PAUSED);
+    const frozen = app.snapshot().virtualTime;
+    expect(app.engine.runFrame(SPEED_MODES.X1)).toBe(false);
+    expect(app.snapshot().virtualTime).toBe(frozen);
+    expect(textOf('[data-field="status"]')).toContain('已暂停');
+    expect(textOf(`${screenEl(SCREEN.BATTLE)} .battle-phase`)).toContain('已暂停');
+  });
+
+  it('暂停态下速度按钮仍然可用，选速度即恢复战斗', () => {
+    toBattle();
+    app.setSpeed(SPEED_MODES.PAUSED);
+
+    const buttons = qa(`${screenEl(SCREEN.BATTLE)} [data-speed]`);
+    expect(buttons.every((b) => !b.disabled)).toBe(true);
+
+    click(buttons.find((b) => b.getAttribute('data-speed') === SPEED_MODES.X4));
+    expect(app.snapshot().status).toBe(GAME_STATUS.BATTLING);
+    const t = app.snapshot().virtualTime;
+    app.engine.runFrame(SPEED_MODES.X4);
+    expect(app.snapshot().virtualTime).toBeGreaterThan(t);
+  });
+
+  it('P 键切换暂停/恢复；输入框里打字不触发', () => {
+    toBattle();
+    const key = (k) => document.dispatchEvent(new window.KeyboardEvent('keydown', { key: k, bubbles: true }));
+
+    key('p');
+    expect(app.snapshot().status).toBe(GAME_STATUS.PAUSED);
+    key('p');
+    expect(app.snapshot().status).toBe(GAME_STATUS.BATTLING);
+
+    const input = document.createElement('input');
+    document.body.append(input);
+    const typing = new window.KeyboardEvent('keydown', { key: 'p', bubbles: true, cancelable: true });
+    input.dispatchEvent(typing);
+    expect(app.snapshot().status).toBe(GAME_STATUS.BATTLING); // 没被误触发
+    input.remove();
+  });
+
+  it('切到后台自动暂停', () => {
+    toBattle();
+    expect(app.snapshot().status).toBe(GAME_STATUS.BATTLING);
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    document.dispatchEvent(new window.Event('visibilitychange'));
+    expect(app.snapshot().status).toBe(GAME_STATUS.PAUSED);
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  });
+
+  it('暂停不算结束：finishBattle 仍拒绝结算', () => {
+    toBattle();
+    app.setSpeed(SPEED_MODES.PAUSED);
+    expect(app.flow.finishBattle()).toEqual({ settled: false });
+    expect(app.snapshot().status).toBe(GAME_STATUS.PAUSED);
+  });
+
+  it('暂停中不给手动存档入口（GameFlow 会把状态写成探索，读档恢复不出来）', async () => {
+    toBattle();
+    app.setSpeed(SPEED_MODES.PAUSED);
+    expect(app.snapshot().status).toBe(GAME_STATUS.PAUSED);
+    app.router.go(SCREEN.SAVES);
+    await tick();
+    expect(q(`${screenEl(SCREEN.SAVES)} [data-save="slot1"]`)).toBeNull();
+
+    // 恢复后按钮回来（存档列表是异步刷新的）
+    app.setSpeed(SPEED_MODES.X1);
+    expect(app.snapshot().status).toBe(GAME_STATUS.BATTLING);
+    app.router.go(SCREEN.SAVES);
+    await tick();
+    expect(q(`${screenEl(SCREEN.SAVES)} [data-save="slot1"]`)).not.toBeNull();
+  });
+});
+
+// ============================================================
+// logLimit：只影响显示，不碰确定性（P1-1）
+// ============================================================
+
+describe('日志显示条数', () => {
+  /** 打满一场并返回战斗日志 DOM 条数与状态里的日志长度。 */
+  function battleLogRows(limit) {
+    return (async () => {
+      const h = await mount({ clearStorage: false });
+      if (limit !== null) {
+        h.router.go(SCREEN.SETTINGS);
+        const select = must(`${screenEl(SCREEN.SETTINGS)} [data-set="logLimit"]`);
+        select.value = String(limit);
+        select.dispatchEvent(new window.Event('input', { bubbles: true }));
+      }
+      h.startNewRun(SEED);
+      const node = h.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.COMBAT);
+      standOn(h, node);
+      h.beginBattle();
+      h.setSpeed(SPEED_MODES.MAX);
+      h.router.go(SCREEN.BATTLE);
+      h.renderAll();
+      return {
+        dom: qa(`${screenEl(SCREEN.BATTLE)} [data-slot="log"] .log-entry`).length,
+        state: h.snapshot().log.length,
+        fingerprint: battleFingerprint(h.snapshot()),
+      };
+    })();
+  }
+
+  it('设成 50 时只显示 50 条，但状态里仍是完整日志', async () => {
+    const full = await battleLogRows(null);
+    expect(full.state).toBeGreaterThan(0);
+
+    const capped = await battleLogRows(50);
+    expect(capped.dom).toBeLessThanOrEqual(50);
+    expect(capped.state).toBe(full.state);
+  }, 30_000);
+
+  it('改这个设置不改变战斗结果（展示裁剪没漏进判定）', async () => {
+    const a = await battleLogRows(100);
+    const b = await battleLogRows(50);
+    expect(b.fingerprint).toEqual(a.fingerprint);
+  }, 30_000);
+});
+
+// ============================================================
+// 运行期错误边界（P1-7）
+// ============================================================
+
+describe('错误边界', () => {
+  it('reportError 会停住战斗、写 state.error 并弹出可退路的面板', () => {
+    startRun(app);
+    const node = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.COMBAT);
+    standOn(app, node);
+    app.beginBattle();
+    app.setSpeed(SPEED_MODES.X1);
+
+    const error = new Error('契约实现炸了');
+    error.code = 'CONTRACT_BOOM';
+    app.reportError(error, 'test');
+
+    const box = q('.dialog-box');
+    expect(box).not.toBeNull();
+    expect(box.textContent).toContain('出了点问题');
+    expect(box.textContent).toContain('CONTRACT_BOOM');
+    expect(box.textContent).toContain('契约实现炸了');
+    expect(app.snapshot().error).toMatchObject({ code: 'CONTRACT_BOOM' });
+    expect(app.snapshot().status).toBe(GAME_STATUS.BATTLING); // 战斗状态本身没被改坏
+
+    click(box.querySelector('[data-act="err-dismiss"]'));
+    expect(q('.app-dialog').hidden).toBe(true);
+    expect(app.snapshot().error).toBeNull();
+  });
+
+  it('错误面板上的「返回主菜单」会离开局内', () => {
+    startRun(app);
+    app.reportError(new Error('模组加载失败'));
+    click(q('.dialog-box [data-act="err-menu"]'));
+    expect(visibleScreen()).toBe(SCREEN.MAIN_MENU);
+    expect(app.snapshot().error).toBeNull();
+  });
+
+  it('错误没被处理完之前不重复弹第二个面板', () => {
+    startRun(app);
+    app.reportError(new Error('第一次'));
+    const first = q('.dialog-box').textContent;
+    app.reportError(new Error('第二次'));
+    expect(qa('.dialog-box').length).toBe(1);
+    expect(q('.dialog-box').textContent).toBe(first);
+    expect(app.snapshot().error.message).toContain('第二次'); // 状态里仍是最新的
+  });
+});

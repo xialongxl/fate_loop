@@ -160,7 +160,14 @@ export function createHistoryEntry(state, { outcome }) {
   };
 }
 
-/** 默认设置。设置界面的字段清单以此为准。 */
+/**
+ * 默认设置。设置界面的字段清单以此为准。
+ *
+ * 每个字段都必须有消费方 —— 上一版留着 `showDamageNumbers` 但根本没画过伤害数字，
+ * 那种"看着有其实没有"的选项比没有更糟，已删。
+ * logLimit 只裁剪**展示**数组：state.log 的容量仍固定为 LOG_CAPACITY，
+ * 否则改一个偏好就会改快照，跨速度对拍与存档比对全部失真。
+ */
 export function defaultSettings() {
   return {
     schemaVersion: SCHEMA_VERSION,
@@ -168,7 +175,6 @@ export function defaultSettings() {
     volume: 0.6,
     defaultSpeed: '1x',
     autoStartBattle: true,
-    showDamageNumbers: true,
     logLimit: 100,
   };
 }

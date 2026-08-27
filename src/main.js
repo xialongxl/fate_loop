@@ -30,7 +30,6 @@ import { Registry } from './contracts/registry.js';
 import { loadMods } from './core/mods/loader.js';
 import { BattleEngine } from './core/battle/engine.js';
 import { GameFlow } from './core/game.js';
-import { buildUnlockTable } from './core/progression.js';
 import { describeGear, rarityOf } from './core/equipment.js';
 import { SaveService } from './persistence/saveService.js';
 import { defaultSettings } from './persistence/schema.js';
@@ -142,11 +141,10 @@ export async function createApp({
   await audio.init?.();
   engine.setAudioSinks({ live: audio, silent: nullAudio });
 
-  /** 技能解锁表：进程内构建一次，序列屏与图鉴屏共用。 */
-  const unlockTable = buildUnlockTable(pool.skills);
-
   const storageInfo = await saveService.init();
   const flow = new GameFlow({ store, engine, pool, saveService, audio });
+  /** 解锁表由 GameFlow 持有（它要在开战前用它洗序列），屏幕共用同一张。 */
+  const unlockTable = flow.unlockTable;
 
   // ============================================================
   // 设置（P1-1：此前 settings 有写无读，这里补上消费方）
@@ -180,19 +178,37 @@ export async function createApp({
 
   store.subscribe((snapshot) => {
     latest = snapshot;
-    renderAll();
+    // 渲染抛错必须被兜住：否则会连锁触发后面每一次 update 都抛
+    try {
+      renderAll();
+    } catch (error) {
+      reportError(error, 'render');
+    }
   });
 
   const getSnapshot = () => latest;
   const getState = () => latest;
   const isRunActive = () =>
-    latest.status === GAME_STATUS.EXPLORING || latest.status === GAME_STATUS.BATTLING;
+    latest.status === GAME_STATUS.EXPLORING ||
+    latest.status === GAME_STATUS.BATTLING ||
+    latest.status === GAME_STATUS.PAUSED;
+  /**
+   * 能不能写存档。暂停中也算有效局内状态 —— 但状态字段一旦在暂停里被写成
+   * EXPLORING（例如读档恢复半路失败），就必须以引擎的真实状态为准，
+   * 否则存档界面会给一个恢复不出来的槽位提供「保存」按钮。
+   */
+  const canWriteSave = () => isRunActive() && engine.isPaused() === false;
 
   // ---- 战斗循环 ----
   let speed = SPEED_MODES.PAUSED;
+  /** 暂停前用的速度，P 键与「继续」按钮都靠它回到玩家上次的手感。 */
+  let lastRunningSpeed = SPEED_MODES.X1;
   let rafHandle = null;
 
   function beginBattle() {
+    // 核心在 startBattle 里也会洗一次（纵深防御）；这里先洗是为了能提示玩家
+    const { removed } = flow.sanitizeSequence();
+    if (removed.length > 0) notify(`${removed.length} 个技能当前等级未解锁，已移出序列`, 'warn');
     flow.startBattle();
     router.go(SCREEN.BATTLE);
     const want = settings.autoStartBattle === false ? SPEED_MODES.PAUSED : settings.defaultSpeed;
@@ -203,17 +219,37 @@ export async function createApp({
     if (![SPEED_MODES.PAUSED, SPEED_MODES.X1, SPEED_MODES.X4, SPEED_MODES.MAX].includes(next)) {
       return;
     }
+    if (next === SPEED_MODES.PAUSED) {
+      stopLoop();
+      engine.pause(); // 写 GAME_STATUS.PAUSED：虚拟时间停止推进，不是「推进但不结算」
+      speed = next;
+      renderAll();
+      return;
+    }
+
+    engine.resume(); // 从暂停态捞回来；不在暂停态时是空操作
     speed = next;
+    lastRunningSpeed = next;
     if (next === SPEED_MODES.MAX) {
       stopLoop();
       engine.runToEnd();
       onBattleStopped();
-    } else if (next === SPEED_MODES.PAUSED) {
-      stopLoop();
     } else if (getSnapshot().status === GAME_STATUS.BATTLING) {
       startLoop();
     }
     renderAll();
+  }
+
+  /** P 键：战斗中/暂停中切换。输入控件里打字不算。 */
+  function togglePause() {
+    const status = getSnapshot().status;
+    if (status !== GAME_STATUS.BATTLING && status !== GAME_STATUS.PAUSED) return;
+    if (engine.isPaused()) {
+      setSpeed(speed === SPEED_MODES.PAUSED ? lastRunningSpeed : speed);
+    } else {
+      setSpeed(SPEED_MODES.PAUSED);
+    }
+    audio.play(status === GAME_STATUS.PAUSED ? 'ui.confirm' : 'ui.click', {});
   }
 
   function startLoop() {
@@ -278,9 +314,10 @@ export async function createApp({
 
     [SCREEN.MAP]: createMapScreen({
       getSnapshot,
-      onNodeActivate: (nodeId) => void handleNodeActivate(nodeId),
-      onNodeAction: (action) => void handleNodeAction(action),
-      onSeedChange: (text) => void handleSeedChange(text),
+      getLogLimit: () => settings.logLimit ?? 100,
+      onNodeActivate: safe((nodeId) => void handleNodeActivate(nodeId)),
+      onNodeAction: safe((action) => void handleNodeAction(action)),
+      onSeedChange: safe((text) => void handleSeedChange(text)),
     }),
 
     [SCREEN.BATTLE]: createBattleScreen({
@@ -288,18 +325,19 @@ export async function createApp({
       getSkills: () => pool.skills,
       getBuffs: () => pool.buffs,
       getSpeed: () => speed,
-      onSpeedChange: (next) => setSpeed(next),
-      onLeave: () => router.go(SCREEN.MAP),
+      onSpeedChange: safe((next) => setSpeed(next)),
+      onLeave: safe(() => router.go(SCREEN.MAP)),
+      getLogLimit: () => settings.logLimit ?? 100,
     }),
 
     [SCREEN.CHARACTER]: createCharacterScreen({ getState }),
 
     [SCREEN.EQUIPMENT]: createEquipmentScreen({
       getState,
-      onEquip: (id) => flow.equip(id),
-      onUnequip: (slot) => flow.unequip(slot),
-      onSalvage: (id) => flow.salvage(id),
-      onEnhance: (id) => flow.enhance(id),
+      onEquip: safe((id) => flow.equip(id)),
+      onUnequip: safe((slot) => flow.unequip(slot)),
+      onSalvage: safe((id) => flow.salvage(id)),
+      onEnhance: safe((id) => flow.enhance(id)),
       onToast: notify,
     }),
 
@@ -307,16 +345,19 @@ export async function createApp({
       getState,
       getSkills: () => pool.skills,
       getUnlockTable: () => unlockTable,
-      onChange: (mutate) => {
+      onChange: safe((mutate) => {
         store.update((draft) => mutate(draft.player));
-      },
+        // 屏幕自己会拦未解锁项，这里再洗一次是给手改进来的状态兜底
+        const { removed } = flow.sanitizeSequence();
+        if (removed.length > 0) notify('有技能当前等级未解锁，已移出序列', 'warn');
+      }),
       onPlayFeedback: (id) => audio.play(id, {}),
       onToast: notify,
     }),
 
     [SCREEN.SAVES]: createSavesScreen({
       listSlots: () => saveService.listSlots(),
-      canSave: isRunActive,
+      canSave: canWriteSave,
       onLoad: async (slotId) => {
         const loadedSlot = await saveService.loadSlot(slotId);
         if (loadedSlot === null) {
@@ -631,6 +672,81 @@ export async function createApp({
   }
 
   // ============================================================
+  // 运行期错误边界（P1-7）
+  //
+  // 屏幕回调抛错、渲染抛错、异步 rejection 都不该把整局卡在半路：
+  // 停止推进、把 code 与消息摊在屏幕上、给出「回主菜单」这条退路。
+  // state.error 只存 code + 消息，不存 stack 与时间戳 —— 状态里的东西都要
+  // 考虑确定性，堆栈留在控制台就够了。
+  // ============================================================
+  let errorDialogOpen = false;
+
+  function reportError(error, where = '') {
+    console.error('[fate-loop] 运行期错误', where, error);
+    stopLoop();
+    const code = typeof error?.code === 'string' ? error.code : String(error?.name ?? 'Unknown');
+    const message = String(error?.message ?? error ?? '未知错误').slice(0, 400);
+    store.update((draft) => {
+      draft.error = { code, message, where: String(where) };
+    });
+
+    if (errorDialogOpen) return;
+    errorDialogOpen = true;
+    const box = dialog.open(
+      `
+      <h2 tabindex="-1">出了点问题</h2>
+      <p class="dialog-text">战斗已停止推进。存档没有被破坏，可以先回主菜单。</p>
+      <p class="library-desc"><span class="tag">${escapeHtml(code)}</span>${
+        where ? ` <span class="tag">${escapeHtml(where)}</span>` : ''
+      }</p>
+      <p class="summary-seq">${escapeHtml(message)}</p>
+      <div class="dialog-actions">
+        <button type="button" data-act="err-menu" class="btn-primary" data-autofocus>返回主菜单</button>
+        <button type="button" data-act="err-dismiss" class="btn-ghost">关掉并继续</button>
+      </div>
+    `,
+      { closeOnBackdrop: false, escapable: false },
+    );
+
+    const finish = (toMenu) => {
+      errorDialogOpen = false;
+      store.update((draft) => {
+        draft.error = null;
+      });
+      dialog.close();
+      if (toMenu) gotoMenu();
+      else renderAll();
+    };
+    box.addEventListener('click', (event) => {
+      const act = event.target.getAttribute?.('data-act');
+      if (act === 'err-menu') finish(true);
+      else if (act === 'err-dismiss') finish(false);
+    });
+  }
+
+  /** 把同步回调包一层：屏幕内部的 DOM 事件由这里兜住。 */
+  function safe(fn) {
+    return (...args) => {
+      try {
+        return fn(...args);
+      } catch (error) {
+        reportError(error, fn.name || 'intent');
+        return undefined;
+      }
+    };
+  }
+
+  function onWindowError(event) {
+    reportError(event.error ?? new Error(String(event.message)), 'window');
+  }
+
+  function onUnhandledRejection(event) {
+    reportError(event.reason ?? new Error('未处理的 Promise 拒绝'), 'promise');
+  }
+  window.addEventListener('error', onWindowError);
+  window.addEventListener('unhandledrejection', onUnhandledRejection);
+
+  // ============================================================
   // 轮回生命周期
   // ============================================================
 
@@ -729,7 +845,7 @@ export async function createApp({
 
   function renderAll() {
     // 屏幕渲染中若再触发 store.update，订阅会重入；限深避免无限递归。
-    if (renderDepth > 3) return;
+    if (renderDepth > 3 || errorDialogOpen) return;
     renderDepth += 1;
     try {
       const state = getSnapshot();
@@ -744,13 +860,28 @@ export async function createApp({
   function onVisibilityChange() {
     if (document.hidden && getSnapshot().status === GAME_STATUS.BATTLING) {
       setSpeed(SPEED_MODES.PAUSED);
+      notify('切到后台，已暂停', 'info');
     }
   }
   document.addEventListener('visibilitychange', onVisibilityChange);
 
+  function onKeyDown(event) {
+    if (event.key !== 'p' && event.key !== 'P') return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const target = event.target;
+    if (typeof target?.closest === 'function' && target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if (router.current !== SCREEN.BATTLE && router.current !== SCREEN.MAP) return;
+    event.preventDefault();
+    togglePause();
+  }
+  document.addEventListener('keydown', onKeyDown);
+
   function destroy() {
     stopLoop();
     document.removeEventListener('visibilitychange', onVisibilityChange);
+    document.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('error', onWindowError);
+    window.removeEventListener('unhandledrejection', onUnhandledRejection);
     dialog.close();
     shell.root.innerHTML = '';
   }
@@ -787,6 +918,8 @@ export async function createApp({
       return { ...settings };
     },
     setSpeed,
+    togglePause,
+    reportError,
     startNewRun,
     restoreRun,
     continueRun,

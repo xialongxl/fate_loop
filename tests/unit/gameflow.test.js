@@ -1161,3 +1161,92 @@ describe('restoreRun', () => {
     expect(t.flow.moveTo(clearedCombat.id)).toEqual({ ok: true, triggeredBattle: false });
   });
 });
+
+// ============================================================
+// 解锁校验（P1-2 的运行时那道防御）
+// ============================================================
+
+describe('序列合法性校验（未解锁技能进不了战斗）', () => {
+  /** 找一个 1 级用不了、高等级才解锁的技能。 */
+  function lockedSkill(h) {
+    const table = h.flow.unlockTable;
+    return [...h.pool.skills.values()].find((s) => (table.get(s.id) ?? 1) > 1);
+  }
+
+  it('GameFlow 自带解锁表，覆盖全部技能', async () => {
+    const h = await boot();
+    expect(h.flow.unlockTable).toBeInstanceOf(Map);
+    expect(h.flow.unlockTable.size).toBe(h.pool.skills.size);
+  });
+
+  it('startBattle 前会把未解锁技能踢出序列并记进日志', async () => {
+    const h = await boot();
+    const locked = lockedSkill(h);
+    const lockedIsOgcd = locked.type === 'oGCD';
+    h.store.update((d) => {
+      if (lockedIsOgcd) {
+        d.player.ogcdSlots.push({ skillId: locked.id, priority: 50, slotIndex: 9 });
+      } else {
+        d.player.gcdSequence.push(locked.id);
+      }
+    });
+
+    h.goto(h.first(NODE_TYPE.COMBAT));
+    h.flow.startBattle();
+
+    const player = h.st().player;
+    expect(player.gcdSequence).not.toContain(locked.id);
+    expect(player.ogcdSlots.map((s) => s.skillId)).not.toContain(locked.id);
+    // 注意：engine.begin 会把日志重置成战斗日志，所以这里不断言通知文本；
+    // 通知走 UI 的 toast（main.js 在 startBattle 前先自己洗一次拿 removed）
+  });
+
+  it('sanitizeSequence 返回被剔除项，且槽位下标重排连续', async () => {
+    const h = await boot();
+    const locked = lockedSkill(h);
+    h.store.update((d) => {
+      d.player.ogcdSlots = [
+        { skillId: 'ogcd.secondWind', priority: 95, slotIndex: 4 },
+        { skillId: locked.id, priority: 50, slotIndex: 7 },
+        { skillId: 'ogcd.suddenStrike', priority: 30, slotIndex: 12 },
+      ];
+    });
+
+    const { removed, level } = h.flow.sanitizeSequence();
+    expect(removed).toEqual([locked.id]);
+    expect(level).toBe(1);
+    expect(h.st().player.ogcdSlots.map((s) => s.slotIndex)).toEqual([0, 1]);
+    expect(h.st().player.ogcdSlots.map((s) => s.skillId)).toEqual([
+      'ogcd.secondWind',
+      'ogcd.suddenStrike',
+    ]);
+  });
+
+  it('等级够高的角色用同一套序列不会被误删', async () => {
+    const h = await boot();
+    const locked = lockedSkill(h);
+    h.store.update((d) => {
+      d.player.exp = totalExpForLevel(120);
+      d.player.gcdSequence = [locked.id];
+      recalcPlayer(d.player);
+    });
+
+    expect(h.flow.sanitizeSequence().removed).toEqual([]);
+    expect(h.st().player.gcdSequence).toEqual([locked.id]);
+  });
+
+  it('读档时同样清洗：伪造一份越级存档也带不进战斗', async () => {
+    const source = await boot();
+    const locked = lockedSkill(source);
+    source.store.update((d) => {
+      d.player.gcdSequence = ['blade.jab', locked.id];
+    });
+    const save = serializeRun(source.st());
+    expect(save.gcdSequence).toContain(locked.id);
+
+    const t = await boot({ seed: 5 });
+    t.flow.restoreRun(save);
+    expect(t.st().player.gcdSequence).toEqual(['blade.jab']);
+    expect(t.st().log.some((l) => l.message.includes('未解锁'))).toBe(true);
+  });
+});

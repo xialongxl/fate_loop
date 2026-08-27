@@ -217,6 +217,38 @@ export class BattleEngine {
     return true;
   }
 
+  /**
+   * 暂停 = 不再推进 virtualTime（而不是"推进但不结算"，后者会破坏确定性）。
+   * 状态写进 GAME_STATUS.PAUSED，这样 UI 与存档看到的就是同一个真相。
+   */
+  pause() {
+    const state = this.#store.unsafeGetState();
+    if (state.status !== GAME_STATUS.BATTLING) return { ok: false, reason: 'notBattling' };
+    this.#store.update((draft) => {
+      draft.status = GAME_STATUS.PAUSED;
+    });
+    return { ok: true };
+  }
+
+  /** 恢复战斗。只在 PAUSED 下有效，绝不把已结束的战斗"救活"。 */
+  resume() {
+    const state = this.#store.unsafeGetState();
+    if (state.status !== GAME_STATUS.PAUSED) return { ok: false, reason: 'notPaused' };
+    this.#store.update((draft) => {
+      draft.status = GAME_STATUS.BATTLING;
+    });
+    return { ok: true };
+  }
+
+  togglePause() {
+    return this.#store.unsafeGetState().status === GAME_STATUS.PAUSED ? this.resume() : this.pause();
+  }
+
+  /** 是否处于「一场未完战斗被暂停」的状态。 */
+  isPaused() {
+    return this.#store.unsafeGetState().status === GAME_STATUS.PAUSED;
+  }
+
   /** 1x / 4x：按倍率跑 N 个 16ms 逻辑步。 */
   runFrame(speed) {
     const stepMs = SPEED_STEP_MS[speed];

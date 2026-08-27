@@ -11,7 +11,13 @@ import { attachMapInteraction } from '../map/interaction.js';
 import { createViewState, resetView } from '../map/viewState.js';
 import { escapeHtml, formatNumber } from '../format.js';
 
-export function createMapScreen({ getSnapshot, onNodeActivate, onNodeAction, onSeedChange }) {
+export function createMapScreen({
+  getSnapshot,
+  onNodeActivate,
+  onNodeAction,
+  onSeedChange,
+  getLogLimit = null,
+}) {
   const element = document.createElement('section');
   element.className = 'screen-map';
   element.innerHTML = `
@@ -132,14 +138,18 @@ export function createMapScreen({ getSnapshot, onNodeActivate, onNodeAction, onS
     `;
   }
 
-  let lastLogLength = -1;
+  let lastLogKey = -1;
 
   function renderLog(snapshot) {
-    if (snapshot.log.length === lastLogLength) return;
-    lastLogLength = snapshot.log.length;
+    // 地图界面的日志是概览，最多 12 条；玩家的 logLimit 更小时以它为准
+    const limit = Math.min(12, Math.max(1, getLogLimit?.() ?? 12));
+    const rows = snapshot.log.slice(-limit);
+    // 键里带上 limit：只比长度的话，改设置后条数没变就永远不重绘
+    const key = rows.length * 1000 + limit;
+    if (key === lastLogKey) return;
+    lastLogKey = key;
     logList.replaceChildren();
-    // 只显示最近 12 条：地图界面的日志是概览，完整日志在战斗界面
-    for (const entry of snapshot.log.slice(-12)) {
+    for (const entry of rows) {
       const li = document.createElement('li');
       li.className = 'log-entry';
       const time = document.createElement('span');
@@ -173,7 +183,7 @@ export function createMapScreen({ getSnapshot, onNodeActivate, onNodeAction, onS
       renderer.applyView(view);
     },
     onEnter() {
-      lastLogLength = -1;
+      lastLogKey = -1;
     },
   };
 }

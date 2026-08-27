@@ -28,6 +28,7 @@ export function createSettingsScreen({ getSettings, onChange, onBack, onResetDat
         <input type="range" min="0" max="100" step="5" data-set="volume" />
       </label>
       <p class="setting-note">MAX 速度全程静音，只在结算播放一次胜/败音效。</p>
+      <p class="setting-note">日志条数只影响显示，不改变战斗状态与存档 —— 同一种子在任何设置下终态逐字节相同。</p>
     </div>
 
     <div class="settings-group">
@@ -45,7 +46,7 @@ export function createSettingsScreen({ getSettings, onChange, onBack, onResetDat
         <input type="checkbox" data-set="autoStartBattle" />
       </label>
       <label class="setting-row">
-        <span class="setting-label">日志保留条数</span>
+        <span class="setting-label">日志显示条数</span>
         <select data-set="logLimit">
           ${[50, 100, 200]
             .map((n) => `<option value="${n}">${n} 条</option>`)

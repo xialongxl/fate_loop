@@ -19,7 +19,7 @@ import {
 import { areAdjacent } from './map/adjacency.js';
 import { revealAround, revealInitial } from './map/reveal.js';
 import { encounterStream } from './prng.js';
-import { battleExpReward, levelFromTotalExp } from './progression.js';
+import { battleExpReward, buildUnlockTable, isSkillUnlocked, levelFromTotalExp } from './progression.js';
 import { recalcPlayer, permanentBonusOf } from './derived.js';
 import { createEmptyEquipment, enhanceGear, salvageValue } from './equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from './loot.js';
@@ -32,6 +32,7 @@ export class GameFlow {
   #pool;
   #saveService;
   #audio;
+  #unlockTable;
 
   constructor({ store, engine, pool, saveService = null, audio = null }) {
     this.#store = store;
@@ -39,6 +40,55 @@ export class GameFlow {
     this.#pool = pool;
     this.#saveService = saveService;
     this.#audio = audio;
+    /** 解锁表随内容池构建一次：序列屏、图鉴屏、战斗前的合法性清洗共用同一张表。 */
+    this.#unlockTable = buildUnlockTable(pool.skills);
+  }
+
+  /** 技能解锁表（skillId → 解锁等级）。只读，UI 拿它渲染锁定态。 */
+  get unlockTable() {
+    return this.#unlockTable;
+  }
+
+  /**
+   * 剔除序列里的未解锁技能。P1-2 的运行时那道防御。
+   *
+   * 为什么要：序列屏已经会拦，但存档可能来自旧版本、可能被手改、也可能
+   * 来自一个技能数量不同的模组组合 —— 那时“把 94 级技能塞给 1 级角色”会真的生效。
+   * 两个调用点：读档后、开战前。剔除而不是报错，是因为报错会让玩家卡在打不了仗。
+   *
+   * @returns {{removed:string[], level:number}} 被剔除的 skillId 与当时等级
+   */
+  sanitizeSequence() {
+    const removed = [];
+    let level = 1;
+    this.#store.update((draft) => {
+      level = this.#sanitizeDraft(draft, removed);
+    });
+    return { removed, level };
+  }
+
+  /**
+   * 在给定 draft 上洗序列（供 update 内部直接调用，避开 Store 禁止嵌套 update 的限制）。
+   * 等级取 `levelFromTotalExp(exp)`而不读 `player.level`：读档时 level 字段还是旧值，
+   * 要等 recalcPlayer 才更新，而清洗得在那之前跑。
+   */
+  #sanitizeDraft(draft, removed) {
+    const level = levelFromTotalExp(draft.player.exp ?? 0);
+    const keep = (skillId) => {
+      if (isSkillUnlocked(this.#unlockTable, skillId, level)) return true;
+      removed.push(skillId);
+      return false;
+    };
+    draft.player.gcdSequence = draft.player.gcdSequence.filter(keep);
+    draft.player.ogcdSlots = draft.player.ogcdSlots.filter((slot) => keep(slot.skillId));
+    // 重排 slotIndex，别让存档里留下 0、2、5 这种断档
+    draft.player.ogcdSlots.forEach((slot, index) => {
+      slot.slotIndex = index;
+    });
+    if (removed.length > 0) {
+      pushLog(draft, `序列里有 ${removed.length} 个当前等级（Lv.${level}）未解锁的技能，已剔除`);
+    }
+    return level;
   }
 
   /** 生成当前层地图并把玩家放到起点。 */
@@ -124,6 +174,9 @@ export class GameFlow {
     const state = this.#store.unsafeGetState();
     const node = state.mapNodes.find((n) => n.id === state.currentNodeId);
     if (node === undefined) throw new FateError('当前节点不存在', { code: 'NO_CURRENT_NODE' });
+
+    // 开战前最后一次洗序列：保证进战斗的序列在当前等级下全部合法
+    this.sanitizeSequence();
 
     const tier = node.type === NODE_TYPE.ELITE ? 'elite' : 'normal';
     this.#audio?.play('battle.start', {});
@@ -471,6 +524,9 @@ export class GameFlow {
       draft.status = GAME_STATUS.EXPLORING;
       draft.log = [];
       pushLog(draft, `读取存档：第 ${draft.floorNumber} 层，等级 ${draft.player.level}`);
+      // 存档可能来自旧版本或被手改：洗掉当前等级用不了的技能。
+      // 放在日志复位之后，否则这条通知会被上面那次 log = [] 抹掉。
+      this.#sanitizeDraft(draft, []);
     });
 
     // 商店商品列表是由种子派生的，重新 open 时会自动重建；

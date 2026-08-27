@@ -10,7 +10,7 @@
  * 全量重建会在 4x 下产生可见掉帧（实测 4 个怪 + 90 行日志时尤其明显）。
  */
 
-import { SPEED_MODES } from '../../core/constants.js';
+import { LOG_CAPACITY, SPEED_MODES } from '../../core/constants.js';
 import { escapeHtml, formatNumber, formatSeconds } from '../format.js';
 
 const SPEED_BUTTONS = [SPEED_MODES.PAUSED, SPEED_MODES.X1, SPEED_MODES.X4, SPEED_MODES.MAX];
@@ -23,6 +23,7 @@ export function createBattleScreen({
   getSpeed,
   onSpeedChange,
   onLeave,
+  getLogLimit = null,
 }) {
   const element = document.createElement('section');
   element.className = 'screen-battle';
@@ -233,13 +234,18 @@ export function createBattleScreen({
       .join('');
   }
 
-  let lastLogLength = -1;
+  let lastLogKey = -1;
 
   function renderLog(snapshot) {
-    if (snapshot.log.length === lastLogLength) return;
-    lastLogLength = snapshot.log.length;
+    // 只裁剪展示：state.log 的容量由引擎固定，设置项不得反向影响战斗状态
+    const limit = Math.max(1, Math.min(LOG_CAPACITY, getLogLimit?.() ?? LOG_CAPACITY));
+    const rows = snapshot.log.slice(-limit);
+    // 键里带上 limit：只比长度的话，改设置后条数没变就永远不重绘
+    const key = rows.length * 1000 + limit;
+    if (key === lastLogKey) return;
+    lastLogKey = key;
     slots.log.replaceChildren();
-    for (const entry of snapshot.log) {
+    for (const entry of rows) {
       const li = document.createElement('li');
       li.className = 'log-entry';
       const time = document.createElement('span');
@@ -296,11 +302,15 @@ export function createBattleScreen({
     const snapshot = getSnapshot();
     const { player, monsters, virtualTime } = snapshot;
     const battling = snapshot.status === 'battling';
+    // 暂停态也要能按速度按钮：否则玩家按下 ⏸ 之后再也开不回来
+    const controllable = battling || snapshot.status === 'paused';
 
     slots.clock.textContent = formatSeconds(virtualTime);
     slots.phase.textContent = battling
       ? '进行中'
-      : snapshot.winner === 'player'
+      : snapshot.status === 'paused'
+        ? '已暂停'
+        : snapshot.winner === 'player'
         ? '胜利'
         : snapshot.winner === 'monsters'
           ? '失败'
@@ -315,7 +325,7 @@ export function createBattleScreen({
       const mode = btn.getAttribute('data-speed');
       btn.classList.toggle('is-active', mode === speed);
       btn.setAttribute('aria-pressed', String(mode === speed));
-      btn.disabled = !battling;
+      btn.disabled = !controllable;
     }
 
     // 玩家卡
@@ -350,7 +360,7 @@ export function createBattleScreen({
       cards.clear();
       slots.playerCard.replaceChildren();
       slots.enemyCards.replaceChildren();
-      lastLogLength = -1;
+      lastLogKey = -1;
     },
   };
 }

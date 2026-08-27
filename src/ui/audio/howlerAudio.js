@@ -35,6 +35,8 @@ export class HowlerAudio {
   preload() {
     if (this.#HowlCtor === null) return;
     for (const entry of SOUND_MANIFEST) {
+      // 没有登记资源就什么都不做：不构造 Howl、不发请求、不产生 404
+      if (entry.src.length === 0) continue;
       try {
         this.#sounds.set(
           entry.id,

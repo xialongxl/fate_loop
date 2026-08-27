@@ -20,13 +20,32 @@ export const SOUND_IDS = Object.freeze({
 });
 
 /**
- * 音效清单。src 为空数组表示"尚无资源"，Howler 加载失败会静默降级 —— 
- * 这正是裁决 8 规则 3 的设计意图：缺资源不影响任何功能。
+ * 已随仓库提供的音频资源：soundId → 可用的容器后缀列表。
+ *
+ * 空表是有意为之：本作不依赖音频（裁决 8：音频永不影响逻辑），仓库里也没
+ * 塞任何二进制。过去给每条清单都填上 `/audio/*.webm` 的写法会造成一堆
+ * 被静吞的 404 请求，看起来像「配了音效但响不了」。
+ *
+ * 要加音效：把文件放进 public/audio/，在此登记 soundId 与后缀即可，其他代码不用动。
+ */
+export const AUDIO_ASSETS = Object.freeze({});
+
+/** 音频文件所在的静态目录（vite 会把 public/ 原样拷到产物根）。 */
+export const AUDIO_ASSET_DIR = '/audio/';
+
+/**
+ * 音效清单。src 为空数组表示「尚无资源」，此时 HowlerAudio 根本不会构造 Howl，
+ * 因此不会发生任何网络请求 —— 缺资源不影响任何功能。
  */
 export const SOUND_MANIFEST = Object.freeze(
   Object.values(SOUND_IDS).map((id) => ({
     id,
-    src: [`/audio/${id}.webm`, `/audio/${id}.m4a`],
+    src: (AUDIO_ASSETS[id] ?? []).map((ext) => `${AUDIO_ASSET_DIR}${id}.${ext}`),
     volume: id.startsWith('ui.') ? 0.35 : 0.5,
   })),
+);
+
+/** 当前真的能发声的音效数（UI 可用于“无声模式”提示）。 */
+export const AUDIO_AVAILABLE_COUNT = Object.freeze(
+  SOUND_MANIFEST.filter((entry) => entry.src.length > 0).length,
 );

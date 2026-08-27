@@ -114,9 +114,10 @@ export default [
     },
   },
 
-  // UI 层：允许 DOM 与物理时钟（渲染节流、动画）。window.confirm 用于种子重置确认。
+  // UI 层：允许 DOM 与物理时钟（渲染节流、动画）。
+  // boot.js 是浏览器入口（只做装配与错误兜底），与 main.js 同级放宽。
   {
-    files: ['src/ui/**/*.js', 'src/main.js'],
+    files: ['src/ui/**/*.js', 'src/main.js', 'src/boot.js'],
     languageOptions: {
       ...baseLanguageOptions,
       globals: {

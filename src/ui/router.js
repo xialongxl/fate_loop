@@ -29,7 +29,12 @@ export class ScreenRouter {
    */
   register(id, screen) {
     invariant(typeof id === 'string' && id !== '', 'register 需要屏幕 id');
-    invariant(screen?.element instanceof Object, `屏幕 ${id} 必须提供 element`);
+    // 不能用 `instanceof Object`：跨 realm（jsdom 测试、iframe）下 DOM 节点的原型链
+    // 通不到当前域的 Object.prototype，会被误判为非法。nodeType 是鸭子类型检查。
+    invariant(
+      screen?.element?.nodeType === 1,
+      `屏幕 ${id} 必须提供已创建的根元素（实得 ${String(screen?.element)}）`,
+    );
     screen.element.classList.add('screen');
     screen.element.dataset.screen = id;
     screen.element.hidden = true;

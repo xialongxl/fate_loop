@@ -78,25 +78,28 @@ export function createToast(container) {
 /**
  * 确认对话框。返回 Promise<boolean>。
  * 不用 window.confirm：它被 eslint 的 no-alert 禁止，且无法样式化。
+ *
+ * onClose 兼作“用户逃开了弹窗”（ESC）的出路：任何导致弹窗消失的路径都必须
+ * settle 这个 Promise，否则 await 会永久挂起（旧版就踩了这个坑）。
  */
 export function createConfirm(dialog) {
   return function confirm(message, { confirmLabel = '确认', cancelLabel = '取消' } = {}) {
     return new Promise((resolve) => {
       const box = dialog.open(
         `
-        <h2>确认操作</h2>
+        <h2 tabindex="-1">确认操作</h2>
         <p class="dialog-text">${escapeHtml(message)}</p>
         <div class="dialog-actions">
-          <button type="button" data-confirm class="btn-primary">${escapeHtml(confirmLabel)}</button>
+          <button type="button" data-confirm class="btn-primary" data-autofocus>${escapeHtml(confirmLabel)}</button>
           <button type="button" data-cancel class="btn-ghost">${escapeHtml(cancelLabel)}</button>
         </div>
       `,
-        { closeOnBackdrop: false },
+        { closeOnBackdrop: false, onClose: () => resolve(false) },
       );
 
       const finish = (result) => {
-        dialog.close();
         resolve(result);
+        dialog.close();
       };
       box.querySelector('[data-confirm]').addEventListener('click', () => finish(true));
       box.querySelector('[data-cancel]').addEventListener('click', () => finish(false));

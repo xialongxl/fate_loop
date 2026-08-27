@@ -141,6 +141,24 @@ export class SaveService {
     await this.deleteSlot(AUTO_SAVE_SLOT);
   }
 
+  /**
+   * 清空全部本地数据：4 个槽位 + 历史战绩 + 设置。
+   * 设置界面「清空全部数据」的后端。同时清空待写队列 —— 否则 flush 会把
+   * 刚删掉的快照又写回去，玩家看到的是“删不干净”的存档。
+   */
+  async clearAll() {
+    if (this.#adapter === null) await this.init();
+    this.#pending.clear();
+    this.#flushScheduled = false;
+    for (const slotId of SAVE_SLOT_IDS) {
+      await this.#adapter.delete(slotKey(slotId));
+    }
+    await this.#adapter.delete(HISTORY_KEY);
+    await this.#adapter.delete(SETTINGS_KEY);
+    await this.#adapter.delete(LEGACY_SAVE_KEY);
+    return { ok: true };
+  }
+
   /** 追加历史记录，保留最近 50 条。 */
   async appendHistory(state, { outcome }) {
     if (this.#adapter === null) await this.init();

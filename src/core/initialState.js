@@ -5,8 +5,9 @@
  * 定义 seedBonus 与初始装备，最终面板由 derived.js#recalcPlayer 算出。
  * 这样调整成长曲线时不需要迁移存档，重算即可。
  *
- * 注意：日志用普通数组 + 定长裁剪，而非 RingBuffer 类。原因是状态要被
- * deepClone 做快照，带私有字段的类实例无法被通用克隆正确复制。
+ * 注意：日志用普通数组 + 定长裁剪，而非 RingBuffer 类（utils/ringBuffer.js 曾存在，
+ * 因下述原因已删）。原因是状态要被 deepClone 做快照，
+ * 带私有字段的类实例无法被通用克隆正确复制。
  */
 
 import { FACTION, GAME_STATUS } from './constants.js';

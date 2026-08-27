@@ -1,0 +1,26 @@
+{
+  "name": "fate-loop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "命运轮回：FATE LOOP — 纯文字、纯单机、模组驱动的 Roguelike 自动战斗工具",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "howler": "2.2.4"
+  },
+  "devDependencies": {
+    "eslint": "9.39.1",
+    "fake-indexeddb": "6.0.0",
+    "jsdom": "25.0.1",
+    "vite": "7.3.6",
+    "vitest": "3.2.7"
+  }
+}

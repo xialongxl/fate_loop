@@ -1,0 +1,129 @@
+/**
+ * 存档界面（阶段 9）。
+ *
+ * 槽位模型参考 Fate_echo：3 个手动槽 + 1 个自动槽，自动槽只读不可手写。
+ * 与 Fate_echo 的差异：本作显示种子，因为种子是复现整局的完整凭据 ——
+ * 玩家可以抄下种子在别处重现同一局，这是确定性内核的直接卖点。
+ */
+
+import { escapeHtml, formatNumber, formatTimestamp } from '../format.js';
+import { slotLabel } from '../../persistence/schema.js';
+import { levelFromTotalExp } from '../../core/progression.js';
+
+export function createSavesScreen({ onLoad, onSave, onDelete, onBack, listSlots, canSave }) {
+  const element = document.createElement('section');
+  element.className = 'screen-saves';
+  element.innerHTML = `
+    <header class="screen-head">
+      <h2 tabindex="-1">存档管理</h2>
+      <button type="button" class="btn-ghost" data-act="back">← 返回</button>
+    </header>
+    <p class="screen-hint">
+      自动存档在每层开始与每场战斗结算后写入，不可手动覆盖。
+      手动槽需要局内才能保存。种子是复现整局的完整凭据。
+    </p>
+    <ul class="slot-list" data-slot="list"></ul>
+  `;
+
+  const list = element.querySelector('[data-slot="list"]');
+
+  function slotCard(slot) {
+    const label = slotLabel(slot.slotId);
+    const saveable = !slot.auto && canSave();
+
+    if (slot.empty === true) {
+      return `
+        <li class="slot-card is-empty">
+          <div class="slot-main">
+            <h3 class="slot-title">${escapeHtml(label)}${slot.auto ? '<span class="slot-tag">自动</span>' : ''}</h3>
+            <p class="slot-meta">空槽位</p>
+          </div>
+          <div class="slot-actions">
+            ${saveable ? `<button type="button" data-save="${slot.slotId}" class="btn-primary">保存到此</button>` : ''}
+          </div>
+        </li>`;
+    }
+
+    if (slot.incompatible === true) {
+      return `
+        <li class="slot-card is-broken">
+          <div class="slot-main">
+            <h3 class="slot-title">${escapeHtml(label)}</h3>
+            <p class="slot-meta">存档版本 v${escapeHtml(slot.schemaVersion)} 与当前引擎不兼容，无法读取</p>
+          </div>
+          <div class="slot-actions">
+            <button type="button" data-delete="${slot.slotId}" class="btn-danger">删除</button>
+          </div>
+        </li>`;
+    }
+
+    const level = levelFromTotalExp(slot.exp ?? 0);
+    return `
+      <li class="slot-card">
+        <div class="slot-main">
+          <h3 class="slot-title">
+            ${escapeHtml(label)}${slot.auto ? '<span class="slot-tag">自动</span>' : ''}
+          </h3>
+          <p class="slot-meta">${escapeHtml(formatTimestamp(slot.savedAt))}</p>
+          <dl class="slot-stats">
+            <div><dt>层数</dt><dd>第 ${slot.floorNumber} 层</dd></div>
+            <div><dt>等级</dt><dd>Lv.${level}</dd></div>
+            <div><dt>碎片</dt><dd>${formatNumber(slot.fateShards)}</dd></div>
+            <div><dt>已清理</dt><dd>${slot.nodesCleared} 节点</dd></div>
+            <div><dt>胜场</dt><dd>${slot.battlesWon}</dd></div>
+            <div><dt>装备</dt><dd>${slot.equippedCount} / 8</dd></div>
+          </dl>
+          <p class="slot-seed">种子 <code>${escapeHtml(slot.seed)}</code></p>
+        </div>
+        <div class="slot-actions">
+          <button type="button" data-load="${slot.slotId}" class="btn-primary">读取</button>
+          ${saveable ? `<button type="button" data-save="${slot.slotId}" class="btn-ghost">覆盖</button>` : ''}
+          <button type="button" data-delete="${slot.slotId}" class="btn-danger">删除</button>
+        </div>
+      </li>`;
+  }
+
+  async function refresh() {
+    list.innerHTML = '<li class="slot-card is-loading">读取存档列表…</li>';
+    let slots = [];
+    try {
+      slots = await listSlots();
+    } catch (error) {
+      list.innerHTML = `<li class="slot-card is-broken">存档列表读取失败：${escapeHtml(
+        error?.message ?? error,
+      )}</li>`;
+      return;
+    }
+    list.innerHTML = slots.map(slotCard).join('');
+  }
+
+  element.addEventListener('click', (event) => {
+    const target = event.target;
+    if (target.getAttribute?.('data-act') === 'back') {
+      onBack();
+      return;
+    }
+    const loadId = target.getAttribute?.('data-load');
+    if (loadId !== null && loadId !== undefined) {
+      void onLoad(loadId).then(refresh);
+      return;
+    }
+    const saveId = target.getAttribute?.('data-save');
+    if (saveId !== null && saveId !== undefined) {
+      void Promise.resolve(onSave(saveId)).then(refresh);
+      return;
+    }
+    const deleteId = target.getAttribute?.('data-delete');
+    if (deleteId !== null && deleteId !== undefined) {
+      void Promise.resolve(onDelete(deleteId)).then(refresh);
+    }
+  });
+
+  return {
+    element,
+    onEnter() {
+      void refresh();
+    },
+    refresh,
+  };
+}

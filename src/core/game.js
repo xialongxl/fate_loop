@@ -21,7 +21,7 @@ import { areAdjacent } from './map/adjacency.js';
 import { revealAround, revealInitial } from './map/reveal.js';
 import { encounterStream } from './prng.js';
 import { battleExpReward, buildUnlockTable, isSkillUnlocked, levelFromTotalExp } from './progression.js';
-import { recalcPlayer, permanentBonusOf } from './derived.js';
+import { addPermanentBonus, recalcPlayer, permanentBonusOf } from './derived.js';
 import { createEmptyEquipment, enhanceGear, salvageValue } from './equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from './loot.js';
 import { pushLog } from '../contracts/defaults/log.js';
@@ -397,7 +397,7 @@ export class GameFlow {
 
     this.#store.update((draft) => {
       draft.fateShards -= item.cost;
-      item.apply(draft);
+      item.apply(draft, this.#stateOps(draft));
       // 永久属性走 permanentBonus，这里统一重算才能立刻反映到面板（P0-3）
       recalcPlayer(draft.player);
       draft.shopStates.get(node.id).purchasedIds.add(itemId);
@@ -430,7 +430,7 @@ export class GameFlow {
     if (choice === undefined) return { ok: false, reason: 'noSuchChoice' };
 
     this.#store.update((draft) => {
-      choice.apply(draft);
+      choice.apply(draft, this.#stateOps(draft));
       const node = draft.mapNodes.find((n) => n.id === draft.currentNodeId);
       if (node !== undefined) {
         node.isCleared = true;
@@ -512,6 +512,60 @@ export class GameFlow {
 
     this.#saveService?.saveRun(this.#store.unsafeGetState());
     return { ok: true, floorNumber: state.floorNumber };
+  }
+
+  /**
+   * 绑定到某个 draft 的安全原语，作为 apply(state, ops) 的第二个参数传给
+   * 商店商品与事件选项。
+   *
+   * 为什么要这层：第三方包的 apply 运行在沙箱里，拿不到 state 对象的写权限
+   * （跨边界只能传可序列化值）。官方内容今天直接改 draft 字段是可信层的特权，
+   * 但把"改什么"收敛成这 9 个操作之后，官方与第三方就能共用同一份语义 ——
+   * 也顺手让"这个选项到底改了哪些东西"变成可枚举的。
+   * 操作集合的来源：node tools/mod-shape-report.mjs 测出的 11 种状态操作。
+   */
+  #stateOps(draft) {
+    const clampInt = (value, fallback = 0) =>
+      Number.isFinite(value) ? Math.trunc(value) : fallback;
+    return {
+      /** 永久属性（唯一正确入口，见 derived.js 的单一数据源原则） */
+      permanentBonus: (bonus) => addPermanentBonus(draft.player, bonus),
+      get shards() {
+        return draft.fateShards;
+      },
+      gainShards: (n) => {
+        const amount = clampInt(n);
+        draft.fateShards += amount;
+        draft.metadata.shardsEarned += amount;
+      },
+      /** 够就扣并返回 true；不够什么都不做并返回 false */
+      spendShards: (n) => {
+        const amount = clampInt(n);
+        if (amount < 0 || draft.fateShards < amount) return false;
+        draft.fateShards -= amount;
+        return true;
+      },
+      setShards: (n) => {
+        draft.fateShards = Math.max(0, clampInt(n));
+      },
+      /** 按最大生命比例回血，夹在上限内 */
+      healRatio: (ratio) => {
+        const max = draft.player.maxHp;
+        draft.player.hp = Math.min(max, draft.player.hp + Math.floor(max * Math.max(0, ratio)));
+      },
+      /** 按当前生命比例扣血，至少留 1 点 */
+      hpCostRatio: (ratio) => {
+        const hp = draft.player.hp;
+        draft.player.hp = Math.max(1, hp - Math.floor(hp * Math.max(0, ratio)));
+      },
+      fullHeal: () => {
+        draft.player.hp = draft.player.maxHp;
+      },
+      /** 统计字段（shardsEarned / battlesWon 之类） */
+      addMetadata: (key, n) => {
+        if (typeof draft.metadata[key] === 'number') draft.metadata[key] += clampInt(n);
+      },
+    };
   }
 
   /** 当前节点对象。 */

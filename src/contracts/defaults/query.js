@@ -22,7 +22,17 @@ export function createStateQuery({ store }) {
       let cursor = state;
       for (const key of selector.split('.')) {
         if (cursor === null || cursor === undefined) return undefined;
-        cursor = cursor instanceof Map ? cursor.get(key) : cursor[key];
+        if (cursor instanceof Map) {
+          cursor = cursor.get(key);
+        } else if (Array.isArray(cursor)) {
+          // 数组只支持数字下标。**不要试图按 id 走路径**：实体 id 含点
+          // （'mon.thunder.herald.t1#0'），会被 split('.') 切碎，永远取不到。
+          // 按 id 取实体请用 ctx.entity(id)。
+          const byIndex = Number(key);
+          cursor = Number.isInteger(byIndex) ? cursor[byIndex] : undefined;
+        } else {
+          cursor = cursor[key];
+        }
       }
       return deepFreeze(deepClone(cursor));
     }

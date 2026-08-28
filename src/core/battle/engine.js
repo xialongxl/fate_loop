@@ -22,11 +22,30 @@ import {
   STEP_MS,
 } from '../constants.js';
 import { isAlive, pruneExpiredBuffs } from '../entity.js';
+import {
+  AUDIO_PLAY,
+  BUFF_APPLY,
+  COMBAT_LOG,
+  DAMAGE_APPLY,
+  HEAL_APPLY,
+  STATE_QUERY,
+} from '../../contracts/symbols.js';
 import { battleStream } from '../prng.js';
 import { applyOutcome, evaluateOutcome } from './resolution.js';
 import { stepEntity } from './scheduler.js';
 import { instantiateMonsters, pickEncounter } from './encounter.js';
 import { FateError } from '../../utils/invariant.js';
+import { deepClone, deepFreeze } from '../../utils/deepFreeze.js';
+
+/** 按 id 查实体。与 contracts/index.js 里那份同语义 —— 这里复制一份是为了
+ *  不让 core 的运行热路径反向依赖装配层模块。 */
+function findEntity(state, entityId) {
+  if (state.player?.id === entityId) return state.player;
+  for (const monster of state.monsters) {
+    if (monster.id === entityId) return monster;
+  }
+  return null;
+}
 
 export class BattleEngine {
   #store;
@@ -145,6 +164,54 @@ export class BattleEngine {
       },
       rng() {
         return engine.getRng().next();
+      },
+
+      /* ------------------------------------------------------------------
+       * 高层能力别名。官方模组可以继续用 get(SYM.xxx)，但**第三方包只该看到
+       * 这一层**：Symbol 是宿主内部标识，跨沙箱边界传不出去，也不该让包作者
+       * 去猜。等价性由 tests/unit/fate-api.test.js 守住。
+       * ---------------------------------------------------------------- */
+      damage(args) {
+        return registry.call(DAMAGE_APPLY, args);
+      },
+      heal(args) {
+        return registry.call(HEAL_APPLY, args);
+      },
+      applyBuff(args) {
+        return registry.call(BUFF_APPLY, args);
+      },
+      /**
+       * 按 id 取实体快照。
+       * 为什么要有它：状态路径按 '.' 分段，而实体 id 本身就含点
+       * （'mon.thunder.herald.t1#0'、'blade.jab'），所以 `query('monsters.' + id)`
+       * 这类写法天生不可能工作 —— 必须走一等 API。
+       */
+      entity(entityId) {
+        const found = findEntity(state, entityId);
+        return found === null ? undefined : deepFreeze(deepClone(found));
+      },
+      /** 读某个实体身上的 Buff 层数（不在场返回 0）。模组作者不该自己碰 buffs Map。 */
+      buffStacks(entity, buffId) {
+        const live = findEntity(state, entity?.id ?? entity) ?? entity;
+        const buff = live?.buffs instanceof Map ? live.buffs.get(buffId) : live?.buffs?.[buffId];
+        if (buff === null || buff === undefined) return 0;
+        return state.virtualTime < buff.expiresAtMs ? buff.stacks : 0;
+      },
+      hasBuff(entity, buffId) {
+        return this.buffStacks(entity, buffId) > 0;
+      },
+      removeBuff({ targetId, buffId }) {
+        const target = findEntity(state, targetId);
+        if (target !== null) target.buffs.delete(buffId);
+      },
+      log(message) {
+        registry.call(COMBAT_LOG, String(message));
+      },
+      sound(soundId) {
+        registry.call(AUDIO_PLAY, { soundId });
+      },
+      query(selector) {
+        return registry.call(STATE_QUERY, selector);
       },
     };
   }

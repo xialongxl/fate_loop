@@ -9,6 +9,12 @@ export default defineConfig({
   // 模组的独立性由 loader.js 的 import.meta.glob 保证：默认惰性模式产出
   // 动态 import()，Rollup 会为每个模组单独切出 chunk，不会被并入主 bundle，
   // 「模组即原生 ESM」的自举原则依然成立。
+  resolve: {
+    // 'fate' 的构建期解析（沙箱期由宿主注入同名模块）。
+    // 让同一个第三方包目录既能放进 src/mods/dev/ 直接调试，也能压成 zip 给玩家装。
+    // 见 docs/模组沙箱与包格式设计.md §5.6
+    alias: { fate: '/src/mods/fate-shim.js' },
+  },
   server: {
     port: 5173,
   },

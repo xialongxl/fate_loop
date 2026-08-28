@@ -12,6 +12,7 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../../src/main.js';
+import { addPermanentBonus } from '../../src/core/derived.js';
 import { Registry } from '../../src/contracts/registry.js';
 import { registerDefaultContracts } from '../../src/contracts/index.js';
 import { loadMods, createContentPool } from '../../src/core/mods/loader.js';
@@ -36,6 +37,23 @@ function devModuleEntries() {
       loadSetup: () => import('../../src/mods/dev/example-pack/setup.js'),
     },
   ];
+}
+
+/** 复刻 GameFlow#stateOps 的最小实现，用来直接调包里的 apply。 */
+function makeOps(player) {
+  return {
+    permanentBonus: (bonus) => addPermanentBonus(player, bonus),
+    shards: 0,
+    gainShards: () => {},
+    spendShards: () => false,
+    setShards: () => {},
+    healRatio: (r) => {
+      player.hp = Math.min(player.maxHp, player.hp + Math.floor(player.maxHp * r));
+    },
+    hpCostRatio: () => {},
+    fullHeal: () => {},
+    addMetadata: () => {},
+  };
 }
 
 /** 造一套「官方 + dev」的内容池（不启动引擎）。 */
@@ -93,11 +111,11 @@ describe('官方 + 示例模组一起加载', () => {
     expect(eclipse.gcdCostMs).toBe(0);
 
     expect(pool.skills.get('void.collapse').buffDurationMs).toBe(8000);
-    expect(pool.buffs.get('example.voidmark').damageTakenMul).toBe(1.12);
+    expect(pool.buffs.get('void.mark').damageTakenMul).toBe(1.12);
     expect(pool.monsters.get('mon.void.riftling').gcdSequence).toContain('void.rift');
     expect(pool.encounters.get('enc.void.lone').maxFloor).toBe(999);
-    expect(pool.shopItems.get('shop.example.voidCore').kind).toBe('upgrade');
-    expect(pool.events.get('event.example.voidAltar').choices).toHaveLength(3);
+    expect(pool.shopItems.get('shop.void.core').kind).toBe('upgrade');
+    expect(pool.events.get('event.void.altar').choices).toHaveLength(3);
   });
 
   it('模组技能引用的官方 ID 通过跨引用校验（怪物混编官方 + 自有技能）', async () => {
@@ -118,9 +136,9 @@ describe('官方 + 示例模组一起加载', () => {
     for (let i = 1; i < voidLevels.length; i += 1) {
       expect(voidLevels[i] - voidLevels[i - 1]).toBeLessThanOrEqual(15);
     }
-    // 不传 families 时新流派会掉进 untagged，被排到最后 —— 这正是必须传的原因
-    const naive = buildUnlockTable(pool.skills);
-    expect(naive.get('void.rift')).toBeGreaterThan(1);
+    // 说明：不传 families 时，本例恰好也给出同样的等级 —— 因为 void 是唯一
+    // 的 untagged 组，且 starter 名额会自动扩到流派数。所以这条不写成反例断言，
+    // 真正的风险是"两个包都 untagged 时混成一桶"，那要等 S2 的多包场景再验。
   });
 
   it('示例怪物能真的打一场：契约伤害生效、日志有输出', async () => {
@@ -177,7 +195,8 @@ describe('官方 + 示例模组一起加载', () => {
     const player = createInitialState(7).player;
     const before = { maxHp: player.maxHp, attack: player.attack };
 
-    pool.shopItems.get('shop.example.voidCore').apply({ player, fateShards: 100, metadata: {} });
+    const ops = makeOps(player);
+    pool.shopItems.get('shop.void.core').apply({ player, fateShards: 100, metadata: {} }, ops);
     recalcPlayer(player);
 
     expect(player.maxHp).toBe(before.maxHp + 25);

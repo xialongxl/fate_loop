@@ -286,6 +286,51 @@ for (const el of visible.filter((x) => x.children.length === 0 && x.textContent.
 }
 if (low.length > 0) problems.push(`对比度 <4.5:1 共 ${low.length} 处：${low.slice(0, 5).join(' | ')}`);
 
+// ---- 两条通用不变量（都是这次漏掉的） ----
+
+// 1) 按钮文字换行 = 十有八九是缺 white-space:nowrap，窄列里会竖排成"卸/下"
+for (const btn of visible.filter(
+  (x) => x.tagName === 'BUTTON' && x.children.length === 0 && x.textContent.trim().length > 0,
+)) {
+  // 只管"纯文字标签按钮"：背包条目那种内含多块结构的按钮（children > 0）本就该换行
+  const cs = getComputedStyle(btn);
+  if (cs.whiteSpace === 'nowrap' || cs.height !== 'auto') continue; // 显式定高的（图标方块）不比
+  const fontSize = Number.parseFloat(cs.fontSize) || 14;
+  const lineHeight = cs.lineHeight === 'normal' ? fontSize * 1.2 : Number.parseFloat(cs.lineHeight);
+  const box =
+    lineHeight +
+    (Number.parseFloat(cs.paddingTop) || 0) +
+    (Number.parseFloat(cs.paddingBottom) || 0) +
+    (Number.parseFloat(cs.borderTopWidth) || 0) +
+    (Number.parseFloat(cs.borderBottomWidth) || 0);
+  const r = btn.getBoundingClientRect();
+  if (r.height > box + 4) {
+    problems.push(`按钮文字换行（多半缺 nowrap）：${tag(btn)} "${btn.textContent.trim().slice(0, 8)}" 高 ${Math.round(r.height)} > 单行 ${Math.round(box)}`);
+  }
+}
+
+// 2) <dt> 与紧跟的 <dd> 必须同一行：不同行说明这个 dl 根本没套样式，
+//    会塌成一列"一行一个词"（装备栏底部的等级/生命/攻击… 就是这么坏的）
+for (const dt of visible.filter((x) => x.tagName === 'DT')) {
+  const dd = dt.nextElementSibling;
+  if (dd === null || dd === undefined || dd.tagName !== 'DD') continue;
+  const a = dt.getBoundingClientRect();
+  const b = dd.getBoundingClientRect();
+  if (a.width === 0 || b.width === 0) continue;
+  if (Math.abs(a.top - b.top) > 3) {
+    problems.push(`dt/dd 不在同一行（dl 缺样式？）：${dt.textContent.trim().slice(0, 6)} / ${dd.textContent.trim().slice(0, 8)}`);
+  }
+}
+
+// 3) 被 ellipsis 藏起来的文字也是缺陷：截断要分场合，槽位名"靴…"就是截错了地方
+for (const el of visible.filter(
+  (x) => x.children.length === 0 && x.textContent.trim().length > 1 && getComputedStyle(x).textOverflow === 'ellipsis',
+)) {
+  if (el.scrollWidth > el.clientWidth + 1) {
+    problems.push(`ellipsis 把文字截断了：${tag(el)} "${el.textContent.trim().slice(0, 10)}"（需要 ${el.scrollWidth}px，只给 ${el.clientWidth}px）`);
+  }
+}
+
 // ---- 界面专属断言 ----
 const screen = doc.querySelector('.screen:not([hidden])');
 if (screen !== null && screen !== undefined) {

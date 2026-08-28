@@ -927,8 +927,10 @@ dd {
 .summary-list,
 .char-stats,
 .history-stats,
+.history-summary,
 .slot-stats,
-.detail-stats {
+.detail-stats,
+.equip-total {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
   gap: 4px 12px;
@@ -940,8 +942,10 @@ dd {
 .summary-list div,
 .char-stats div,
 .history-stats div,
+.history-summary div,
 .slot-stats div,
-.detail-stats div {
+.detail-stats div,
+.equip-total div {
   display: flex;
   justify-content: space-between;
   gap: 8px;
@@ -1343,10 +1347,18 @@ code {
 
 .entity-stats {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--text-dim);
+}
+
+/* 每对 标签/值 必须同一行：漏了这条时战斗卡里会竖成「攻 / 115」两行 */
+.entity-stats div {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
 }
 
 .hp-track {
@@ -1857,6 +1869,12 @@ code {
   font-size: 12px;
 }
 
+.equip-slot > .btn-ghost,
+.equip-slot > .btn-danger {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .equip-slot.is-empty {
   border-style: dashed;
   color: var(--text-dim);
@@ -1874,9 +1892,11 @@ code {
 }
 
 .equip-slot-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 槽位名只有两个字，给它固定宽度：默认 flex-shrink:1 会被右边的长属性串
+     挤成「靴…」——截断该发生在装备名/属性上，不是标签上 */
+  flex: 0 0 3.4em;
   white-space: nowrap;
+  color: var(--text-dim);
 }
 
 .equip-total {

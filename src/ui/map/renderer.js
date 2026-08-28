@@ -5,7 +5,7 @@
  * 且能直接挂 ARIA 属性满足无障碍要求。
  */
 
-import { NODE_TYPE } from '../../core/constants.js';
+import { NODE_TYPE, ZOOM_MAX } from '../../core/constants.js';
 
 const CELL = 64;
 const RADIUS = 20;
@@ -68,6 +68,39 @@ export class MapRenderer {
   }
 
   /**
+   * 算出把视野对准「已揭示区域」的变换参数。
+   *
+   * 为什么需要：viewBox 是整层世界（例如 8×11 → 592×784，纵向），而画布通常是
+   * 横向的。开局只揭示三五个节点时，meet 缩放会把整个世界塞进画布，那几个点就
+   * 变成漂在虚空里的芝麻。对准已揭示区放大后，开局画面是"我在这儿，周围未知"。
+   *
+   * 只动视图状态（裁决 5：不入存档、不进快照），因此不影响确定性。
+   * @returns {{zoom:number, offsetX:number, offsetY:number}|null}
+   */
+  fitToRevealed(snapshot) {
+    const revealed = (snapshot.mapNodes ?? []).filter((n) => n.isRevealed);
+    if (revealed.length === 0) return null;
+
+    const vbWidth = snapshot.gridWidth * CELL + PADDING * 2;
+    const vbHeight = snapshot.gridHeight * CELL + PADDING * 2;
+    const minX = PADDING + Math.min(...revealed.map((n) => n.gridX)) * CELL;
+    const maxX = PADDING + (Math.max(...revealed.map((n) => n.gridX)) + 1) * CELL;
+    const minY = PADDING + Math.min(...revealed.map((n) => n.gridY)) * CELL;
+    const maxY = PADDING + (Math.max(...revealed.map((n) => n.gridY)) + 1) * CELL;
+
+    // 留 25% 边距，别让节点贴着画布边缘；上限收一档避免单点时放大到糊
+    const zoom = Math.min(
+      ZOOM_MAX,
+      Math.max(0.5, Math.min(vbWidth / (maxX - minX), vbHeight / (maxY - minY)) * 0.75),
+    );
+    return {
+      zoom,
+      offsetX: vbWidth / 2 - zoom * ((minX + maxX) / 2),
+      offsetY: vbHeight / 2 - zoom * ((minY + maxY) / 2),
+    };
+  }
+
+  /**
    * 全量重绘。节点数量在数十级别，全量重绘比 diff 更简单且足够快。
    * @param {object} snapshot 状态快照
    * @param {object} options
@@ -86,6 +119,15 @@ export class MapRenderer {
     const cx = (node) => PADDING + node.gridX * CELL + CELL / 2;
     const cy = (node) => PADDING + node.gridY * CELL + CELL / 2;
     const byId = new Map(mapNodes.map((n) => [n.id, n]));
+
+    // 未揭示的节点画成雾点。不画的话开局整块画布是空的，
+    // 玩家会以为地图没加载出来 —— 空白和"还没探索"是两种完全不同的观感。
+    for (const node of mapNodes) {
+      if (node.isRevealed) continue;
+      this.#nodeLayer.append(
+        el('circle', { class: 'map-fog', cx: cx(node), cy: cy(node), r: 4, 'aria-hidden': 'true' }),
+      );
+    }
 
     // 连线：只画一次（id 小的一端负责）
     for (const node of mapNodes) {

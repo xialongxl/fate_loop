@@ -369,6 +369,13 @@ body {
   stroke-width: 3;
 }
 
+/* 未揭示节点：只表示"这里还没看过"，不带任何类型信息 */
+.map-fog {
+  fill: #1f2630;
+  stroke: #262d38;
+  stroke-width: 1;
+}
+
 .map-node {
   cursor: default;
 }
@@ -1646,12 +1653,21 @@ code {
 }
 
 .library-controls {
+  /* 竖排两组：搜索+勾选一行，筛选器一行。横排会把「仅显示已解锁」挤出面板 */
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 8px;
 }
 
-.library-controls input {
+.library-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.library-search input {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -1663,6 +1679,34 @@ code {
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.filter-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: flex-start;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 两组之间给一条竖分隔：否则 GCD/oGCD 与流派 chips 看着像同一组 */
+.filter-group + .filter-group {
+  border-left: 1px solid var(--border);
+  padding-left: 14px;
+}
+
+.filter-caption {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .filter-row {
@@ -1670,6 +1714,11 @@ code {
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 8px;
+  min-width: 0;
+}
+
+.filter-group .filter-row {
+  margin-bottom: 0;
 }
 
 .filter-row:empty {
@@ -2318,9 +2367,17 @@ code {
     width: 100%;
     overflow-x: auto;
   }
+}
 
+/* 只有真的很窄（手机档）才收起导航文字：900px 那一行还很空，
+   只留 ⌗◈☰❖ 六个图标等于让人猜谜 */
+@media (max-width: 620px) {
   .nav-label {
     display: none;
+  }
+
+  .nav-btn {
+    padding: 6px 10px;
   }
 }
 

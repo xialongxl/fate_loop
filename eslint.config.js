@@ -126,6 +126,7 @@ export default [
         globalThis: 'readonly',
         document: 'readonly',
         window: 'readonly',
+        location: 'readonly',
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
         localStorage: 'readonly',

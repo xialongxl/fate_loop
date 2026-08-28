@@ -533,3 +533,32 @@ describe('存档往返：restoreRun', () => {
     expect(shopState.offers).toEqual([]);
   });
 });
+
+describe('降级原因要能被说出来（不能只说"降级"）', () => {
+  it('IndexedDB 不可用时，attempts 里带着具体原因', async () => {
+    const savedIdb = globalThis.indexedDB;
+    delete globalThis.indexedDB;
+    resetAdapterCache();
+    try {
+      const service = new SaveService();
+      const info = await service.init();
+      expect(info.kind).not.toBe('indexeddb');
+      expect(info.degraded).toBe(true);
+      const idb = info.attempts.find((a) => a.kind === 'indexeddb');
+      expect(idb).toBeDefined();
+      expect(idb.reason).toContain('IndexedDB');
+    } finally {
+      globalThis.indexedDB = savedIdb;
+      resetAdapterCache();
+    }
+  });
+
+  it('一切正常时 attempts 为空数组', async () => {
+    resetAdapterCache();
+    const service = new SaveService();
+    const info = await service.init();
+    expect(info.kind).toBe('indexeddb');
+    expect(info.degraded).toBe(false);
+    expect(info.attempts).toEqual([]);
+  });
+});

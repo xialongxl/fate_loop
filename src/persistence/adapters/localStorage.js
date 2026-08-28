@@ -7,15 +7,22 @@ const PREFIX = 'fate-loop:';
 
 export class LocalStorageAdapter {
   kind = 'localstorage';
+  lastError = null;
 
   async isAvailable() {
     try {
-      if (typeof localStorage === 'undefined' || localStorage === null) return false;
+      if (typeof localStorage === 'undefined' || localStorage === null) {
+        this.lastError = 'localStorage 未定义';
+        return false;
+      }
       const probe = `${PREFIX}__probe__`;
       localStorage.setItem(probe, '1');
       localStorage.removeItem(probe);
+      this.lastError = null;
       return true;
-    } catch {
+    } catch (error) {
+      // 隐私模式/禁用站点数据时 setItem 抛 SecurityError，配额满时抛 QuotaExceededError
+      this.lastError = String(error?.name ?? 'Error') + '：' + String(error?.message ?? error);
       return false;
     }
   }

@@ -40,7 +40,7 @@ export class SaveService {
   #errorListeners = new Set();
 
   async init() {
-    const { adapter, degraded } = await pickAdapter();
+    const { adapter, degraded, attempts = [] } = await pickAdapter();
     this.#adapter = adapter;
     this.#degraded = degraded;
     // 清理 v1 遗留的单键存档，避免存档界面出现读不出来的幽灵条目
@@ -49,7 +49,7 @@ export class SaveService {
     } catch {
       // 清理失败无害
     }
-    return { kind: adapter.kind, degraded };
+    return { kind: adapter.kind, degraded, attempts };
   }
 
   get degraded() {

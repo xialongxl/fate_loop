@@ -66,26 +66,36 @@ export function createSequenceScreen({
         <section class="panel">
           <h3 class="panel-title">技能库</h3>
           <div class="library-controls">
-            <label class="visually-hidden" for="skill-search">搜索技能</label>
-            <input id="skill-search" type="search" placeholder="搜索名称或描述…" data-slot="search" />
-            <div class="filter-row" role="group" aria-label="技能类型筛选">
-              <button type="button" data-type="GCD" class="filter-btn is-active">GCD</button>
-              <button type="button" data-type="oGCD" class="filter-btn">oGCD</button>
+            <div class="library-search">
+              <label class="visually-hidden" for="skill-search">搜索技能</label>
+              <input id="skill-search" type="search" placeholder="搜索名称或描述…" data-slot="search" />
+              <label class="filter-check">
+                <input type="checkbox" data-slot="only-unlocked" checked />
+                仅显示已解锁
+              </label>
             </div>
-            <div class="filter-row" role="group" aria-label="流派筛选" data-slot="family-row">
-              ${Object.entries(FAMILY_LABELS)
-                .map(
-                  ([id, label]) =>
-                    `<button type="button" data-family="${id}" class="filter-btn ${
-                      id === 'all' ? 'is-active' : ''
-                    }">${label}</button>`,
-                )
-                .join('')}
+            <div class="filter-groups">
+              <div class="filter-group">
+                <span class="filter-caption" aria-hidden="true">类型</span>
+                <div class="filter-row" role="group" aria-label="技能类型筛选">
+                  <button type="button" data-type="GCD" class="filter-btn is-active">GCD</button>
+                  <button type="button" data-type="oGCD" class="filter-btn">oGCD</button>
+                </div>
+              </div>
+              <div class="filter-group">
+                <span class="filter-caption" aria-hidden="true">流派</span>
+                <div class="filter-row" role="group" aria-label="流派筛选" data-slot="family-row">
+                  ${Object.entries(FAMILY_LABELS)
+                    .map(
+                      ([id, label]) =>
+                        `<button type="button" data-family="${id}" class="filter-btn ${
+                          id === 'all' ? 'is-active' : ''
+                        }">${label}</button>`,
+                    )
+                    .join('')}
+                </div>
+              </div>
             </div>
-            <label class="filter-check">
-              <input type="checkbox" data-slot="only-unlocked" checked />
-              仅显示已解锁
-            </label>
           </div>
           <ul class="skill-library" data-slot="library"></ul>
         </section>

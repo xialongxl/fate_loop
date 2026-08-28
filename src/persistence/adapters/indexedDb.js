@@ -11,6 +11,8 @@ const STORE_NAME = 'kv';
 
 export class IndexedDbAdapter {
   kind = 'indexeddb';
+  /** 最近一次探测失败的原因。降级提示要说清"为什么"，光说"降级"没法排查。 */
+  lastError = null;
   #dbPromise = null;
 
   /** 打开指定版本；version 为 undefined 时打开当前版本（不触发升级）。 */
@@ -72,8 +74,11 @@ export class IndexedDbAdapter {
   async isAvailable() {
     try {
       const db = await this.#openDb();
-      return db !== null && db !== undefined && db.objectStoreNames.contains(STORE_NAME);
-    } catch {
+      const ok = db !== null && db !== undefined && db.objectStoreNames.contains(STORE_NAME);
+      if (!ok) this.lastError = '库能打开但缺少 kv 仓库';
+      return ok;
+    } catch (error) {
+      this.lastError = String(error?.message ?? error);
       return false;
     }
   }

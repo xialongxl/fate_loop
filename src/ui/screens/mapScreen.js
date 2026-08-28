@@ -67,12 +67,30 @@ export function createMapScreen({
   `;
   const logList = logSlot.querySelector('[data-slot="log-list"]');
 
+  // 玩家手动缩放/平移过就别再自动对准，否则每次回地图都把他视角抢走
+  let viewTouched = false;
+
   attachMapInteraction({
     svg: renderer.svg,
     view,
-    onViewChange: () => renderer.applyView(view),
+    onViewChange: () => {
+      viewTouched = true;
+      renderer.applyView(view);
+    },
     onNodeActivate,
   });
+
+  /** 把视野对准已揭示区（换层/换种子/读档后调用）。 */
+  function fitView() {
+    const fit = renderer.fitToRevealed(getSnapshot());
+    if (fit !== null) {
+      view.zoom = fit.zoom;
+      view.offsetX = fit.offsetX;
+      view.offsetY = fit.offsetY;
+    }
+    viewTouched = false;
+    renderer.applyView(view);
+  }
 
   element.addEventListener('click', (event) => {
     const act = event.target.getAttribute?.('data-act');
@@ -173,7 +191,9 @@ export function createMapScreen({
     const snapshot = getSnapshot();
     const adjacentIds = new Set(snapshot.mapAdjacency[snapshot.currentNodeId] ?? []);
     renderer.render(snapshot, { adjacentIds, battling: false });
-    renderer.applyView(view);
+    // 首次渲染（或换层后）自动对准已揭示区；玩家手动动过就不插手
+    if (!viewTouched && view.zoom === 1 && view.offsetX === 0 && view.offsetY === 0) fitView();
+    else renderer.applyView(view);
     if (document.activeElement !== seedInput) seedInput.value = String(snapshot.seed);
     renderNodePanel(snapshot);
     renderLog(snapshot);

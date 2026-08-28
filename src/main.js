@@ -147,6 +147,32 @@ export async function createApp({
   const unlockTable = flow.unlockTable;
 
   // ============================================================
+  // 存储后端的可读说明
+  //
+  // 光说「降级」没用 —— 得说清是被什么挡住的。真实场景：以 file:// 打开
+  // （浏览器对不透明源禁用 IndexedDB）、隐私模式 / 站点数据被拦、另一个标签页
+  // 占着旧版本连接导致升级被 block。三种的处理方式完全不同。
+  // ============================================================
+  function describeStorage(info) {
+    const blocked = (info.attempts ?? []).map((a) => `${a.kind}：${a.reason}`);
+    const protocol =
+      typeof location !== 'undefined' && location.protocol === 'file:'
+        ? '当前以 file:// 打开，浏览器会禁用 IndexedDB —— 请用 npm run dev 或任意静态服务器访问'
+        : null;
+    const head = info.degraded
+      ? `存档后端：${info.kind}（降级，可能被浏览器清理）`
+      : `存档后端：${info.kind}`;
+    const details = [protocol, ...blocked].filter((x) => x !== null && x !== undefined);
+    return {
+      kind: info.kind,
+      degraded: info.degraded,
+      blocked,
+      short: details.length === 0 ? head : `${head} · 原因见设置页`,
+      long: details.length === 0 ? head : `${head}。${details.join('；')}`,
+    };
+  }
+
+  // ============================================================
   // 设置（P1-1：此前 settings 有写无读，这里补上消费方）
   // ============================================================
   let settings = await saveService.loadSettings();
@@ -910,13 +936,12 @@ export async function createApp({
   }
 
   // ---- 启动：主菜单 ----
-  const storageLabel = storageInfo.degraded
-    ? `存档后端：${storageInfo.kind}（降级，可能被浏览器清理）`
-    : `存档后端：${storageInfo.kind}`;
-  shell.fields.storage.textContent = storageLabel;
-  // 设置屏自己也要知道降级情况：它在页尾显示一行数据去向
+  const storage = describeStorage(storageInfo);
+  shell.fields.storage.textContent = storage.short;
+  shell.fields.storage.title = storage.long;
+  // 设置屏页尾显示完整原因：头部那一行放不下"为什么降级"
   screens[SCREEN.SETTINGS].setStorageInfo?.(
-    `${storageLabel} · 历史战绩保留最近 50 条`,
+    `${storage.long} · 历史战绩保留最近 50 条`,
   );
   if (!Object.values(SPEED_MODES).includes(settings.defaultSpeed)) {
     settings = { ...settings, defaultSpeed: SPEED_MODES.X1 };
@@ -952,6 +977,7 @@ export async function createApp({
     beginBattle,
     notify,
     renderAll,
+    storageSummary: () => describeStorage(storageInfo),
     destroy,
     /** 当前缓存快照（测试与调试用）。 */
     snapshot: getSnapshot,

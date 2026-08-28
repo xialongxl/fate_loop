@@ -1022,3 +1022,72 @@ describe('通关面板', () => {
     expect(h.screens[SCREEN.MAIN_MENU].element.querySelector('[data-act="continue"]').disabled).toBe(true);
   });
 });
+
+describe('存储后端提示', () => {
+  it('降级时头部说"原因见设置页"，完整原因挂在 title 与设置页上', async () => {
+    const savedIdb = globalThis.indexedDB;
+    delete globalThis.indexedDB;
+    try {
+      const h = await mount();
+      const note = q('[data-field="storage"]');
+      expect(note.textContent).toContain('降级');
+      expect(note.textContent).toContain('原因见设置页');
+      expect(note.title).toContain('IndexedDB');
+
+      h.router.go(SCREEN.SETTINGS);
+      await tick(2);
+      expect(q(`${screenEl(SCREEN.SETTINGS)} [data-slot="storage"]`).textContent).toContain('IndexedDB');
+      expect(h.storageSummary().degraded).toBe(true);
+    } finally {
+      globalThis.indexedDB = savedIdb;
+    }
+  });
+
+  it('未降级时不带"降级"字样', async () => {
+    expect(app.storageSummary().degraded).toBe(false);
+    expect(textOf('[data-field="storage"]')).toMatch(/存档后端：indexeddb/);
+    expect(textOf('[data-field="storage"]')).not.toContain('降级');
+  });
+});
+
+describe('地图视图', () => {
+  it('未揭示节点画成雾点，而不是什么都不画（否则开局像坏图）', () => {
+    startRun(app);
+    const state = app.snapshot();
+    const fog = qa(`${screenEl(SCREEN.MAP)} .map-fog`);
+    expect(state.mapNodes.filter((n) => !n.isRevealed).length).toBeGreaterThan(0);
+    expect(fog.length).toBe(state.mapNodes.filter((n) => !n.isRevealed).length);
+    // 雾点不带类型信息，也不参与键盘焦点
+    expect(fog[0].getAttribute('aria-hidden')).toBe('true');
+    expect(fog[0].getAttribute('tabindex')).toBeNull();
+  });
+
+  it('开局自动把视野对准已揭示区（而不是整个世界缩成一点）', () => {
+    startRun(app);
+    const fit = app.screens[SCREEN.MAP].element;
+    expect(fit).toBeTruthy();
+    const zoom = Number(
+      document
+        .querySelector(`${screenEl(SCREEN.MAP)} .map-viewport`)
+        .getAttribute('transform')
+        .match(/scale\(([\d.]+)\)/)[1],
+    );
+    // 只揭示起点附近时，zoom 应当被放大到 1 以上；等于 1 说明对准逻辑没跑
+    expect(zoom).toBeGreaterThan(1);
+  });
+
+  it('玩家手动缩放后，切屏回来不再抢走他的视角', () => {
+    startRun(app);
+    const viewport = document.querySelector(`${screenEl(SCREEN.MAP)} .map-viewport`);
+    const before = viewport.getAttribute('transform');
+    // 模拟一次滚轮缩小（对准后已在 ZOOM_MAX，只能往小调）；interaction 会置 viewTouched
+    const svg = document.querySelector(`${screenEl(SCREEN.MAP)} .map-svg`);
+    svg.dispatchEvent(new window.WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+    const touched = viewport.getAttribute('transform');
+    expect(touched).not.toBe(before);
+
+    app.router.go(SCREEN.CHARACTER);
+    app.router.go(SCREEN.MAP);
+    expect(document.querySelector(`${screenEl(SCREEN.MAP)} .map-viewport`).getAttribute('transform')).toBe(touched);
+  });
+});

@@ -24,20 +24,35 @@ export async function pickAdapter({ force = false } = {}) {
   if (cached !== null && !force) return cached;
 
   const candidates = [new IndexedDbAdapter(), new LocalStorageAdapter(), new MemoryAdapter()];
+  /** 每一档的探测结果。降级时必须能说出"是被什么挡住的"。 */
+  const attempts = [];
+
   for (const adapter of candidates) {
     let ok = false;
     try {
       ok = await adapter.isAvailable();
-    } catch {
+      if (!ok && adapter.kind === 'indexeddb') {
+        // 「另一个标签页占着旧版本连接」导致的 onblocked 是瞬时状态：
+        // 等一小段时间再试一次，别因为一次撞车就永久退回 localStorage。
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        ok = await adapter.isAvailable();
+      }
+    } catch (error) {
+      adapter.lastError = String(error?.message ?? error);
       ok = false;
     }
     if (ok) {
-      cached = { adapter, degraded: adapter.kind !== 'indexeddb' };
+      cached = { adapter, degraded: adapter.kind !== 'indexeddb', attempts };
       return cached;
     }
+    attempts.push({ kind: adapter.kind, reason: adapter.lastError ?? '探测返回不可用' });
   }
 
-  cached = { adapter: new MemoryAdapter(), degraded: true };
+  cached = {
+    adapter: new MemoryAdapter(),
+    degraded: true,
+    attempts: [...attempts, { kind: 'memory', reason: '全部后端不可用，仅存内存（刷新即丢）' }],
+  };
   return cached;
 }
 

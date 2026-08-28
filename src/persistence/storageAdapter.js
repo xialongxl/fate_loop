@@ -60,4 +60,49 @@ export function resetAdapterCache() {
   cached = null;
 }
 
+/** LocalStorageAdapter 的键前缀（搬家时要剥掉）。 */
+const LS_PREFIX = 'fate-loop:';
+
+/**
+ * 一次性搬家：把降级期间写进 localStorage 的数据搬到 IndexedDB。
+ *
+ * 为什么必须有：版本锁那个 bug 会让浏览器整整一段时间都跑在 localStorage 上，
+ * 修好之后主用后端又变回 IndexedDB —— 不搬的话玩家刷新一次就看到"存档全空了"，
+ * 而数据其实一条没丢，只是躺在另一个后端里。
+ *
+ * 只搬 IndexedDB 里还没有的键（不覆盖），搬完保留 localStorage 原件当备份：
+ * 静默删用户数据不是这个模块的权限。
+ *
+ * @returns {Promise<{moved:number, skipped:number}>}
+ */
+export async function migrateLocalToIndexedDb(idbAdapter) {
+  if (typeof localStorage === 'undefined' || localStorage === null) return { moved: 0, skipped: 0 };
+
+  let moved = 0;
+  let skipped = 0;
+  const total = Number(localStorage.length ?? 0);
+
+  for (let i = 0; i < total; i += 1) {
+    const fullKey = localStorage.key(i);
+    if (typeof fullKey !== 'string' || !fullKey.startsWith(LS_PREFIX)) continue;
+    const key = fullKey.slice(LS_PREFIX.length);
+    if (key === '' || key.startsWith('__')) continue; // 探测键等内部项
+    try {
+      const existing = await idbAdapter.get(key);
+      if (existing !== undefined && existing !== null) {
+        skipped += 1;
+        continue;
+      }
+      const raw = localStorage.getItem(fullKey);
+      if (raw === null) continue;
+      await idbAdapter.set(key, JSON.parse(raw));
+      moved += 1;
+    } catch {
+      skipped += 1;
+    }
+  }
+
+  return { moved, skipped };
+}
+
 export { IndexedDbAdapter, LocalStorageAdapter, MemoryAdapter };

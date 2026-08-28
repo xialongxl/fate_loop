@@ -562,3 +562,65 @@ describe('降级原因要能被说出来（不能只说"降级"）', () => {
     expect(info.attempts).toEqual([]);
   });
 });
+
+describe('IndexedDB 版本自愈不能反过来锁死自己', () => {
+  /** 用指定版本直接建库（绕开适配器，模拟用户浏览器里已有的状态）。 */
+  function openRaw(version, { withStore = true } = {}) {
+    return new Promise((resolve, _reject) => {
+      const request = indexedDB.open('fate-loop', version);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (withStore && !db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+      };
+      request.onsuccess = () => {
+        request.result.close();
+        resolve();
+      };
+      request.onerror = () => _reject(request.error ?? new Error('open 失败'));
+    });
+  }
+
+  function dropDb() {
+    // 删除失败/被阻塞都继续往下走：每个用例自己先 drop 再建，状态是干净的
+    return new Promise((resolve) => {
+      const request = indexedDB.deleteDatabase('fate-loop');
+      request.onsuccess = request.onblocked = request.onerror = () => resolve();
+    });
+  }
+
+  it('库已被自愈提到版本 2 时，适配器仍能打开并读写（旧实现会永久降级）', async () => {
+    await dropDb();
+    await openRaw(2);
+
+    const adapter = new IndexedDbAdapter();
+    expect(await adapter.isAvailable()).toBe(true);
+    expect(adapter.lastError).toBeNull();
+
+    await adapter.set('run:slot1', { hello: 'world' });
+    expect(await adapter.get('run:slot1')).toEqual({ hello: 'world' });
+    await dropDb();
+    resetAdapterCache();
+  });
+
+  it('库存在但缺仓库时，自愈提版本后仍可用', async () => {
+    await dropDb();
+    await openRaw(1, { withStore: false });
+
+    const adapter = new IndexedDbAdapter();
+    expect(await adapter.isAvailable()).toBe(true);
+    await adapter.set('k', 7);
+    expect(await adapter.get('k')).toBe(7);
+    await dropDb();
+    resetAdapterCache();
+  });
+
+  it('全新浏览器环境下首次打开即建库建仓库', async () => {
+    await dropDb();
+    const adapter = new IndexedDbAdapter();
+    expect(await adapter.isAvailable()).toBe(true);
+    await adapter.set('a', 1);
+    expect(await adapter.keys()).toEqual(['a']);
+    await dropDb();
+    resetAdapterCache();
+  });
+});

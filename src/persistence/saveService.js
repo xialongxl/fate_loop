@@ -29,7 +29,7 @@ import {
   summarizeSave,
 } from './schema.js';
 import { AUTO_SAVE_SLOT } from '../core/constants.js';
-import { pickAdapter } from './storageAdapter.js';
+import { migrateLocalToIndexedDb, pickAdapter } from './storageAdapter.js';
 
 export class SaveService {
   #adapter = null;
@@ -49,7 +49,17 @@ export class SaveService {
     } catch {
       // 清理失败无害
     }
-    return { kind: adapter.kind, degraded, attempts };
+    // 降级期间写进 localStorage 的数据搬回来，否则修好版本锁那一刻玩家会以为存档没了
+    let migrated = { moved: 0, skipped: 0 };
+    if (adapter.kind === 'indexeddb') {
+      try {
+        migrated = await migrateLocalToIndexedDb(adapter);
+      } catch {
+        // 搬家失败不影响游戏：数据仍在 localStorage，下次启动再试
+      }
+    }
+
+    return { kind: adapter.kind, degraded, attempts, migrated };
   }
 
   get degraded() {

@@ -6,7 +6,8 @@
  */
 
 const DB_NAME = 'fate-loop';
-const DB_VERSION = 1;
+/** 期望的最低版本。只用于自愈时算下一个版本号，绝不拿它当 open 的参数（见 #openDb）。 */
+const DB_MIN_VERSION = 1;
 const STORE_NAME = 'kv';
 
 export class IndexedDbAdapter {
@@ -15,7 +16,7 @@ export class IndexedDbAdapter {
   lastError = null;
   #dbPromise = null;
 
-  /** 打开指定版本；version 为 undefined 时打开当前版本（不触发升级）。 */
+  /** 打开指定版本；version 为 undefined 时打开浏览器里的当前版本。 */
   #rawOpen(version) {
     return new Promise((resolve, reject) => {
       if (typeof indexedDB === 'undefined' || indexedDB === null) {
@@ -35,17 +36,26 @@ export class IndexedDbAdapter {
     });
   }
 
+  /**
+   * 打开库。**必须不带版本号去开**：
+   *
+   * 曾经这里写的是 `open(name, DB_VERSION=1)`，而下面的自愈逻辑可能已经把用户的库
+   * 提到版本 2 —— 再请求版本 1 会抛 `VersionError: The requested version (1) is
+   * less than the existing version (2)`，于是每次加载都失败，永久降级到 localStorage。
+   * 不带版本即"打开当前版本"，新库会以版本 1 创建并触发 onupgradeneeded，
+   * 老库（含被自愈提过版本的）也能正常打开。
+   */
   #openDb() {
     if (this.#dbPromise !== null) return this.#dbPromise;
 
     this.#dbPromise = (async () => {
-      let db = await this.#rawOpen(DB_VERSION);
+      let db = await this.#rawOpen(undefined);
 
-      // 自愈：库已存在于同版本但缺少对象仓库时，onupgradeneeded 不会触发，
+      // 自愈：库已存在但缺少对象仓库时，onupgradeneeded 不会触发，
       // 后续 transaction() 会抛 NotFoundError。此时提版本号强制走一次升级。
       // 触发场景：早期版本用过别的仓库名、升级事务曾被中止、或用户手工删过仓库。
       if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const nextVersion = db.version + 1;
+        const nextVersion = Math.max(DB_MIN_VERSION, db.version) + 1;
         db.close();
         this.#dbPromise = null;
         db = await this.#rawOpen(nextVersion);

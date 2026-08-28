@@ -163,12 +163,22 @@ export async function createApp({
       ? `存档后端：${info.kind}（降级，可能被浏览器清理）`
       : `存档后端：${info.kind}`;
     const details = [protocol, ...blocked].filter((x) => x !== null && x !== undefined);
+    const migrated =
+      info.migrated && info.migrated.moved > 0
+        ? `已自动找回 ${(info.migrated).moved} 条降级期间写在 localStorage 的数据`
+        : null;
     return {
       kind: info.kind,
       degraded: info.degraded,
-      blocked,
-      short: details.length === 0 ? head : `${head} · 原因见设置页`,
-      long: details.length === 0 ? head : `${head}。${details.join('；')}`,
+      migrated: info.migrated ?? null,
+      notice: migrated,
+      short:
+        migrated !== null
+          ? `${head} · ${migrated}`
+          : details.length === 0
+            ? head
+            : `${head} · 原因见设置页`,
+      long: details.length === 0 ? (migrated ?? head) : `${head}。${details.join('；')}`,
     };
   }
 

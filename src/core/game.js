@@ -41,8 +41,11 @@ export class GameFlow {
     this.#pool = pool;
     this.#saveService = saveService;
     this.#audio = audio;
-    /** 解锁表随内容池构建一次：序列屏、图鉴屏、战斗前的合法性清洗共用同一张表。 */
-    this.#unlockTable = buildUnlockTable(pool.skills);
+    /** 解锁表随内容池构建一次：序列屏、图鉴屏、战斗前的合法性清洗共用同一张表。
+     *  把模组注册的流派一起传进去，否则新流派的技能会掉进 untagged 被排到最后。 */
+    this.#unlockTable = buildUnlockTable(pool.skills, {
+      families: [...pool.families.keys()],
+    });
   }
 
   /** 技能解锁表（skillId → 解锁等级）。只读，UI 拿它渲染锁定态。 */

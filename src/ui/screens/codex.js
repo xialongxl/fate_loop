@@ -24,11 +24,10 @@ const TABS = [
 ];
 
 /**
- * 标签 → 中文名。流派部分取自 core 的唯一来源；其余是技能上的辅助标签
- * （起手/爆发…），只用于展示，不参与解锁轮转。
+ * 非流派标签的中文名（起手/爆发…）。这些只用于展示与筛选，
+ * 不参与解锁轮转；流派标签一律取自 core 的 SKILL_FAMILY_LABELS。
  */
-const FAMILY_LABELS = Object.freeze({
-  ...SKILL_FAMILY_LABELS,
+const TAG_LABELS = Object.freeze({
   blade: '锋刃',
   opener: '起手',
   burst: '爆发',
@@ -37,13 +36,17 @@ const FAMILY_LABELS = Object.freeze({
   ogcd: '插入',
 });
 
-/** 流派筛选按钮的固定顺序：先六个真流派，再其余标签。 */
-const FAMILY_ORDER = Object.freeze([
-  ...SKILL_FAMILIES,
-  ...Object.keys(FAMILY_LABELS).filter((k) => !SKILL_FAMILIES.includes(k)),
-]);
-
-export function createCodexScreen({ getPool, getUnlockTable, getSnapshot, onBack }) {
+export function createCodexScreen({ getPool, getUnlockTable, getSnapshot, onBack, familyLabels = null }) {
+  /** 标签 → 中文名：core 官方流派 + 模组注册流派 + 辅助标签。 */
+  const FAMILY_LABELS = Object.freeze({ ...SKILL_FAMILY_LABELS, ...TAG_LABELS, ...(familyLabels ?? {}) });
+  /** 筛选顺序：官方流派 → 模组流派 → 辅助标签。去重后顺序稳定。 */
+  const FAMILY_ORDER = Object.freeze([
+    ...new Set([
+      ...SKILL_FAMILIES,
+      ...Object.keys(familyLabels ?? {}),
+      ...Object.keys(TAG_LABELS),
+    ]),
+  ]);
   const element = document.createElement('section');
   element.className = 'screen-codex';
   element.innerHTML = `

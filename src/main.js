@@ -30,6 +30,7 @@ import { Registry } from './contracts/registry.js';
 import { loadMods } from './core/mods/loader.js';
 import { BattleEngine } from './core/battle/engine.js';
 import { GameFlow } from './core/game.js';
+import { SKILL_FAMILY_LABELS } from './core/constants.js';
 import { describeGear, rarityOf } from './core/equipment.js';
 import { SaveService } from './persistence/saveService.js';
 import { defaultSettings } from './persistence/schema.js';
@@ -147,6 +148,11 @@ export async function createApp({
   const flow = new GameFlow({ store, engine, pool, saveService, audio });
   /** 解锁表由 GameFlow 持有（它要在开战前用它洗序列），屏幕共用同一张。 */
   const unlockTable = flow.unlockTable;
+  /** 流派中文名：core 官方标签 + 各模组（含 dev 示例包）注册的流派。 */
+  const familyLabels = Object.freeze({
+    ...SKILL_FAMILY_LABELS,
+    ...Object.fromEntries([...pool.families.values()].map((family) => [family.id, family.label])),
+  });
 
   // ============================================================
   // 存储后端的可读说明
@@ -392,6 +398,7 @@ export async function createApp({
       }),
       onPlayFeedback: (id) => audio.play(id, {}),
       onToast: notify,
+      familyLabels,
     }),
 
     [SCREEN.SAVES]: createSavesScreen({
@@ -436,6 +443,7 @@ export async function createApp({
       getUnlockTable: () => unlockTable,
       getSnapshot,
       onBack: () => router.back(SCREEN.MAIN_MENU),
+      familyLabels,
     }),
 
     [SCREEN.HISTORY]: createHistoryScreen({

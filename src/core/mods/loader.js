@@ -35,6 +35,8 @@ export function createContentPool() {
     shopItems: new Map(),
     events: new Map(),
     mapGenerators: new Map(),
+    /** 流派注册表：id → {id, label, source}。解锁表的轮转与 UI 筛选按钮都读它。 */
+    families: new Map(),
   };
 }
 
@@ -156,6 +158,16 @@ function mergeIntoPool(pool, result, modId) {
   }
   for (const generator of result.mapGenerators ?? []) {
     pool.mapGenerators.set(generator.id, generator);
+  }
+  for (const family of result.families ?? []) {
+    if (typeof family?.id !== 'string' || family.id === '') {
+      throw new ModLoadError(`模组 ${modId} 的 families 条目必须有非空 id`, { modId });
+    }
+    pool.families.set(family.id, {
+      id: family.id,
+      label: typeof family.label === 'string' && family.label !== '' ? family.label : family.id,
+      source: modId,
+    });
   }
 }
 

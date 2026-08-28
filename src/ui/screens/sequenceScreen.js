@@ -11,8 +11,8 @@
 import { OGCD_SLOT_LIMIT, SKILL_FAMILY_LABELS, SKILL_TYPE } from '../../core/constants.js';
 import { escapeHtml } from '../format.js';
 
-/** 筛选按钮：「全部」+ 各流派，中文名取自 core 的唯一来源。 */
-const FAMILY_LABELS = Object.freeze({ all: '全部', ...SKILL_FAMILY_LABELS });
+/** 没传 familyLabels 时的兜底：core 登记的官方流派。 */
+const DEFAULT_FAMILY_LABELS = Object.freeze({ all: '全部', ...SKILL_FAMILY_LABELS });
 
 export function createSequenceScreen({
   getState,
@@ -21,7 +21,12 @@ export function createSequenceScreen({
   onChange,
   onPlayFeedback,
   onToast,
+  familyLabels = null,
 }) {
+  /** 筛选按钮的流派列表。模组注册的新流派由 main.js 合并进来传这里。 */
+  const FAMILY_LABELS = familyLabels === null
+    ? DEFAULT_FAMILY_LABELS
+    : Object.freeze({ all: '全部', ...familyLabels });
   const element = document.createElement('section');
   element.className = 'screen-sequence';
   element.innerHTML = `

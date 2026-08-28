@@ -114,10 +114,15 @@ export function battleExpReward({ monsterCount, floorNumber, isElite }) {
   return Math.max(1, Math.floor(base * (isElite ? EXP_REWARD.ELITE_MULTIPLIER : 1)));
 }
 
-/** 取技能所属流派：tags 里第一个命中的登记流派；都没有则 untagged。 */
-export function familyOf(skill) {
+/**
+ * 取技能所属流派：tags 里第一个命中的登记流派；都没有则 untagged。
+ * @param {string[]} [familyIds] 参与匹配的流派 id 列表。默认只有 core 登记的官方流派 ——
+ *   模组新增流派必须把它传进来（`GameFlow` 用 `pool.families` 做这件事），
+ *   否则该流派的技能会全落进 untagged，在轮转里被排到最后。
+ */
+export function familyOf(skill, familyIds = SKILL_FAMILIES) {
   const tags = skill?.tags ?? [];
-  for (const family of SKILL_FAMILIES) {
+  for (const family of familyIds) {
     if (tags.includes(family)) return family;
   }
   return UNGROUPED_FAMILY;
@@ -142,18 +147,18 @@ function byCostThenId(cost) {
  * oGCD 走代价排序：内容池里 30 个 oGCD 有 23 个没打流派标签（内容待办，
  * 见交接文档），对它们轮转只是在排 untagged 一坠，没有意义。
  */
-function orderByUnlock(list, cost, roundRobin) {
+function orderByUnlock(list, cost, roundRobin, familyIds) {
   if (!roundRobin) return list.sort(byCostThenId(cost));
 
   const groups = new Map();
   for (const skill of list) {
-    const family = familyOf(skill);
+    const family = familyOf(skill, familyIds);
     if (!groups.has(family)) groups.set(family, []);
     groups.get(family).push(skill);
   }
   for (const skills of groups.values()) skills.sort(byCostThenId(cost));
 
-  const order = [...SKILL_FAMILIES, UNGROUPED_FAMILY].filter((family) => groups.has(family));
+  const order = [...familyIds, UNGROUPED_FAMILY].filter((family) => groups.has(family));
   const out = [];
   for (let rank = 0; out.length < list.length; rank += 1) {
     for (const family of order) {
@@ -178,11 +183,18 @@ function orderByUnlock(list, cost, roundRobin) {
  * 类型不认识的技能（模组乱填）一律 1 级可用 —— 未知不限制，宁放不拦。
  *
  * @param {Map<string, object>} skills 内容池技能表
+ * @param {object} [options]
+ * @param {string[]} [options.families] 参与轮转的流派 id（官方在前、模组追加在后）。
+ *   不传则只用 core 的 SKILL_FAMILIES —— 模组流派会被当成 untagged 排最后。
  * @returns {Map<string, number>} skillId → 解锁等级
  */
-export function buildUnlockTable(skills) {
+export function buildUnlockTable(skills, { families = null } = {}) {
   const table = new Map();
   const all = [...skills.values()];
+  const familyIds =
+    families === null
+      ? [...SKILL_FAMILIES]
+      : [...new Set([...SKILL_FAMILIES, ...families])];
 
   const buckets = [
     {
@@ -190,33 +202,44 @@ export function buildUnlockTable(skills) {
       starter: STARTER_GCD_COUNT,
       cost: (s) => s.gcdCostMs ?? 0,
       roundRobin: true,
+      familyIds,
     },
     {
       type: SKILL_TYPE.OGCD,
       starter: STARTER_OGCD_COUNT,
       cost: (s) => s.cooldownMs ?? 0,
       roundRobin: false,
+      familyIds,
     },
   ];
 
   const claimed = new Set();
-  for (const { type, starter, cost, roundRobin } of buckets) {
+  for (const { type, starter, cost, roundRobin, familyIds: ids } of buckets) {
     const list = orderByUnlock(
       all.filter((skill) => skill.type === type && !claimed.has(skill.id)),
       cost,
       roundRobin,
+      ids,
     );
     for (const skill of list) claimed.add(skill.id);
 
-    const gated = Math.max(0, list.length - starter);
+    /**
+     * 轮转列表是“每族一个”交错的，所以 1 级名额至少得覆盖所有流派：
+     * 否则第 7 个流派（模组加的）永远排在 starter 之外，1 级玩家永远摸不到它。
+     * 官方六个流派时这个 max 恰好等于原值，因此官方内容行为不变。
+     */
+    const familyCount = new Set(list.map((skill) => familyOf(skill, ids))).size;
+    const starterCount = roundRobin ? Math.max(starter, familyCount) : starter;
+
+    const gated = Math.max(0, list.length - starterCount);
     const span = SKILL_UNLOCK_MAX_LEVEL - 1;
     list.forEach((skill, index) => {
-      if (index < starter) {
+      if (index < starterCount) {
         table.set(skill.id, 1);
         return;
       }
       // 第 i 个受限技能落在 2 .. SKILL_UNLOCK_MAX_LEVEL 上
-      const i = index - starter + 1;
+      const i = index - starterCount + 1;
       const level = gated <= 1 ? SKILL_UNLOCK_MAX_LEVEL : 1 + Math.ceil((i * span) / gated);
       table.set(skill.id, Math.min(SKILL_UNLOCK_MAX_LEVEL, Math.max(2, level)));
     });

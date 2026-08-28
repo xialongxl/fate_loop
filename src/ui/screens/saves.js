@@ -2,6 +2,9 @@
  * 存档界面（阶段 9）。
  *
  * 槽位模型参考 Fate_echo：3 个手动槽 + 1 个自动槽，自动槽只读不可手写。
+ * 已通关的存档（victoryAchieved）会打「已通关」标签：那是一局走完 50 层后
+ * 继续无尽时存下来的，与普通中途档值得区分。
+ *
  * 与 Fate_echo 的差异：本作显示种子，因为种子是复现整局的完整凭据 ——
  * 玩家可以抄下种子在别处重现同一局，这是确定性内核的直接卖点。
  */
@@ -63,6 +66,7 @@ export function createSavesScreen({ onLoad, onSave, onDelete, onBack, listSlots,
         <div class="slot-main">
           <h3 class="slot-title">
             ${escapeHtml(label)}${slot.auto ? '<span class="slot-tag">自动</span>' : ''}
+            ${slot.victoryAchieved === true ? '<span class="slot-tag is-win">已通关</span>' : ''}
           </h3>
           <p class="slot-meta">${escapeHtml(formatTimestamp(slot.savedAt))}</p>
           <dl class="slot-stats">

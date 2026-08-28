@@ -102,6 +102,21 @@ describe('schema：序列化', () => {
     expect(save.clearedNodeIds).toEqual(['node_1_1', 'node_5_5', 'node_9_9']);
   });
 
+  it('通关标记入存档并出现在摘要里（老存档缺字段按未通关）', async () => {
+    const { store, flow } = await createHarness({ seed: 77 });
+    flow.enterFloor(1);
+    expect(serializeRun(store.unsafeGetState()).victoryAchieved).toBe(false);
+    expect(summarizeSave(serializeRun(store.unsafeGetState())).victoryAchieved).toBe(false);
+
+    store.update((d) => { d.victoryAchieved = true; });
+    const save = serializeRun(store.unsafeGetState());
+    expect(save.victoryAchieved).toBe(true);
+    expect(summarizeSave(save).victoryAchieved).toBe(true);
+
+    delete save.victoryAchieved;
+    expect(summarizeSave(save).victoryAchieved).toBe(false);
+  });
+
   it('不存 level / 派生属性 —— exp 是唯一真相源', async () => {
     const { store, flow } = await createHarness({ seed: 7 });
     flow.enterFloor(1);

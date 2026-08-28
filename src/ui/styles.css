@@ -1993,6 +1993,11 @@ code {
   color: var(--text-dim);
 }
 
+.slot-tag.is-win {
+  border-color: var(--success);
+  color: #9ce8b0;
+}
+
 .slot-meta {
   margin: 0 0 8px;
   font-family: var(--mono);

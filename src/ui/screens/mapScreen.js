@@ -5,7 +5,7 @@
  * 技能序列、装备、战斗都搬到了各自的独立屏幕。
  */
 
-import { NODE_TYPE } from '../../core/constants.js';
+import { NODE_TYPE, VICTORY_FLOOR } from '../../core/constants.js';
 import { MapRenderer, NODE_VISUALS } from '../map/renderer.js';
 import { attachMapInteraction } from '../map/interaction.js';
 import { createViewState, resetView } from '../map/viewState.js';
@@ -117,7 +117,12 @@ export function createMapScreen({
       buttons.push('<button type="button" data-action="battle" class="btn-primary">进入战斗</button>');
     }
     if (atExit) {
-      buttons.push('<button type="button" data-action="descend" class="btn-primary">前往下一层</button>');
+      // 终点层的出口要说清楚这是通关，而不是"又一层"
+      buttons.push(
+        snapshot.floorNumber >= VICTORY_FLOOR && !snapshot.victoryAchieved
+          ? `<button type="button" data-action="descend" class="btn-primary is-primary">踏入轮回尽头（第 ${VICTORY_FLOOR} 层通关）</button>`
+          : '<button type="button" data-action="descend" class="btn-primary">前往下一层</button>',
+      );
     }
 
     nodeSlot.innerHTML = `

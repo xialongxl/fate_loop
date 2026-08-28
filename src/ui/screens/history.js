@@ -4,9 +4,9 @@
  *
  * 数据源是 SaveService 的 history 存储（GameFlow 在永久死亡时写入，保留 50 条）。
  *
- * 已知空洞（交接文档 P1-6，未决策）：本作没有胜利结局，所以 outcome 恒为
- * 'death'，「通关」这一行永远为空。这里不伪造 victory 记录，而是把「尚无通关」
- * 如实显示 —— 等产品定了终点层，再补 outcome === 'victory' 的分支。
+ * 通关（P1-6）：第 50 层使用出口即写入 outcome:'victory' 记录；通关后选
+ * 「继续挑战无尽」再死的，outcome 是 'death' 但带 victoryAchieved 标记，
+ * 卡片上标成「通关后 · 无尽」，不冒充第二次通关。
  */
 
 import { escapeHtml, formatNumber, formatTimestamp } from '../format.js';
@@ -83,7 +83,7 @@ export function createHistoryScreen({ listHistory, getSnapshot, onOpenCodex, onB
       <div><dt>最深</dt><dd>第 ${stat.deepest} 层</dd></div>
       <div><dt>平均深度</dt><dd>${stat.avgFloor.toFixed(1)} 层</dd></div>
       <div><dt>累计胜场</dt><dd>${formatNumber(stat.battlesWon)}</dd></div>
-      <div><dt>通关</dt><dd>${stat.victories === 0 ? '尚无（本作暂无胜利结局）' : stat.victories}</dd></div>
+      <div><dt>通关</dt><dd>${stat.victories === 0 ? '尚无' : stat.victories}</dd></div>
     `;
   }
 
@@ -97,12 +97,17 @@ export function createHistoryScreen({ listHistory, getSnapshot, onOpenCodex, onB
 
   function entryCard(entry) {
     const outcome = OUTCOME_LABELS[entry.outcome] ?? { text: entry.outcome ?? '未知', cls: '' };
+    const endlessTag =
+      entry.outcome !== 'victory' && entry.victoryAchieved === true
+        ? '<span class="tag is-added">通关后 · 无尽</span>'
+        : '';
     const sequence = (entry.gcdSequence ?? []).length;
     const ogcd = (entry.ogcdSlots ?? []).length;
     return `
       <li class="history-card ${outcome.cls}">
         <div class="history-head">
           <span class="history-outcome ${outcome.cls}">${escapeHtml(outcome.text)}</span>
+          ${endlessTag}
           <strong>第 ${entry.floorReached ?? 0} 层</strong>
           <span class="history-when">${escapeHtml(formatTimestamp(entry.recordedAt))}</span>
         </div>

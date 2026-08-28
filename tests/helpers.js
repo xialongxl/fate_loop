@@ -80,7 +80,7 @@ export const TEST_OGCD_SLOTS = [
  * @param {object} [options]
  * @param {number} [options.seed]
  */
-export async function createHarness({ seed = 123456789, gcdSequence, ogcdSlots } = {}) {
+export async function createHarness({ seed = 123456789, gcdSequence, ogcdSlots, saveService = null } = {}) {
   const pool = await loadOfficialPool();
   const store = new Store(
     createInitialState(seed, {
@@ -100,7 +100,7 @@ export async function createHarness({ seed = 123456789, gcdSequence, ogcdSlots }
   });
 
   engine = new BattleEngine({ store, registry, pool });
-  const flow = new GameFlow({ store, engine, pool, saveService: null, audio: null });
+  const flow = new GameFlow({ store, engine, pool, saveService, audio: null });
 
   return { store, registry, engine, flow, pool };
 }

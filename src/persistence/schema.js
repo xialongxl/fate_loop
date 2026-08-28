@@ -95,6 +95,8 @@ export function serializeRun(state) {
     inventory: state.player.inventory.map(serializeGear),
 
     fateShards: state.fateShards,
+    // 通关标记（P1-6）。老存档缺它按 false 处理：那时还没有终点层这回事
+    victoryAchieved: state.victoryAchieved === true,
     shopPurchases: [...state.shopStates.entries()]
       .map(([nodeId, shop]) => [nodeId, setToArray(shop.purchasedIds)])
       .sort((a, b) => (a[0] < b[0] ? -1 : 1)),
@@ -133,6 +135,7 @@ export function summarizeSave(record) {
     fateShards: save.fateShards ?? 0,
     nodesCleared: (save.clearedNodeIds ?? []).length,
     battlesWon: save.metadata?.battlesWon ?? 0,
+    victoryAchieved: save.victoryAchieved === true,
     equippedCount: Object.values(save.equipment ?? {}).filter((g) => g !== null).length,
   };
 }
@@ -154,6 +157,8 @@ export function createHistoryEntry(state, { outcome }) {
     shardsEarned: state.metadata.shardsEarned,
     expEarned: state.metadata.expEarned ?? 0,
     gearFound: state.metadata.gearFound ?? 0,
+    /** 本局是否先通关过再死在无尽里。历史界面据此标「通关后 · 无尽」。 */
+    victoryAchieved: state.victoryAchieved === true,
     gcdSequence: [...state.player.gcdSequence],
     ogcdSlots: state.player.ogcdSlots.map((s) => s.skillId),
     outcome,

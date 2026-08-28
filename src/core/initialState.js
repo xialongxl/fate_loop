@@ -90,6 +90,11 @@ export function createInitialState(seed, options = {}) {
 
     // 当前战斗上下文：{ nodeId, attemptIndex, isElite }
     activeBattle: null,
+    /**
+     * 本局是否已经通关。通关后选「继续挑战无尽」会把它置 true 并回到探索态，
+     * 之后每次下层都不再触发第二次结算 —— 它同时也是无尽死亡的标记。
+     */
+    victoryAchieved: false,
     /** 上一场战斗的结算摘要（经验、碎片、掉落），供战斗界面展示 */
     lastBattleReward: null,
 

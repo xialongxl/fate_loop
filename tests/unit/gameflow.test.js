@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createHarness } from '../helpers.js';
+import { AUTO_SAVE_SLOT } from '../../src/core/constants.js';
 import {
   GAME_STATUS,
   GROWTH_PER_LEVEL,
@@ -25,6 +26,7 @@ import {
   SHOP_GEAR_COUNT,
   SHOP_OFFER_COUNT,
   SPEED_MODES,
+  VICTORY_FLOOR,
   WINNER,
 } from '../../src/core/constants.js';
 import { enhanceCost, rollEquipment, salvageValue } from '../../src/core/equipment.js';
@@ -37,8 +39,8 @@ import { serializeRun } from '../../src/persistence/schema.js';
 const SEED = 20240101;
 
 /** 装配一局并进入第 1 层，附带若干测试脚手架。 */
-async function boot(overrides = {}) {
-  const h = await createHarness({ seed: SEED, ...overrides });
+async function boot(options = {}) {
+  const h = await createHarness({ seed: SEED, ...options });
   h.flow.enterFloor(1);
 
   const st = () => h.store.unsafeGetState();
@@ -1248,5 +1250,152 @@ describe('序列合法性校验（未解锁技能进不了战斗）', () => {
     t.flow.restoreRun(save);
     expect(t.st().player.gcdSequence).toEqual(['blade.jab']);
     expect(t.st().log.some((l) => l.message.includes('未解锁'))).toBe(true);
+  });
+});
+
+// ============================================================
+// 通关与无尽（P1-6）
+// ============================================================
+
+describe('通关与无尽', () => {
+  /** 直接落到终点层的出口（enterFloor 可指定层数，不必真的一层层爬）。 */
+  async function atVictoryExit(floor = VICTORY_FLOOR) {
+    const h = await boot();
+    h.flow.enterFloor(floor);
+    const exit = h.byId(h.st().exitNodeId);
+    h.goto(exit);
+    return h;
+  }
+
+  it('终点层的出口即通关：FINISHED + winner=PLAYER，且不会生成下一层', async () => {
+    const h = await atVictoryExit();
+    const floorBefore = h.st().floorNumber;
+
+    const result = h.flow.descend();
+    expect(result).toEqual({ ok: true, victory: true, floorNumber: floorBefore });
+
+    const s = h.st();
+    expect(s.status).toBe(GAME_STATUS.FINISHED);
+    expect(s.winner).toBe(WINNER.PLAYER);
+    expect(s.battleEndReason).toBe('victory');
+    expect(s.floorNumber).toBe(floorBefore);
+    expect(s.victoryAchieved).toBe(true);
+    expect(s.metadata.floorsCleared).toBe(1);
+    expect(s.log.some((l) => l.message.includes('轮回通关'))).toBe(true);
+  });
+
+  it('未到终点层时 descend 只是下层，绝不出现 victory', async () => {
+    const h = await atVictoryExit(VICTORY_FLOOR - 1);
+    expect(h.flow.descend()).toEqual({ ok: true, floorNumber: VICTORY_FLOOR });
+    const s = h.st();
+    expect(s.victoryAchieved).toBe(false);
+    expect(s.status).toBe(GAME_STATUS.EXPLORING);
+  });
+
+  it('通关结算不是一场战斗：finishBattle 必须拒绝而不是踩空 activeBattle', async () => {
+    const h = await atVictoryExit();
+    h.flow.descend();
+    expect(h.st().activeBattle).toBeNull();
+    expect(h.flow.finishBattle()).toEqual({ settled: false });
+  });
+
+  it('继续挑战无尽：回到探索态，之后下层不再触发第二次结算', async () => {
+    const h = await atVictoryExit();
+    h.flow.descend();
+
+    expect(h.flow.continueEndless()).toEqual({ ok: true, floorNumber: VICTORY_FLOOR });
+    expect(h.st().status).toBe(GAME_STATUS.EXPLORING);
+    expect(h.st().winner).toBeNull();
+
+    // 仍在出口：再点就是真正下层
+    const second = h.flow.descend();
+    expect(second.victory).toBeUndefined();
+    expect(h.st().floorNumber).toBe(VICTORY_FLOOR + 1);
+
+    // 无尽段里没有第二次通关
+    h.flow.enterFloor(VICTORY_FLOOR + 5);
+    h.goto(h.byId(h.st().exitNodeId));
+    expect(h.flow.descend()).toEqual({ ok: true, floorNumber: VICTORY_FLOOR + 6 });
+    expect(h.st().victoryAchieved).toBe(true);
+  });
+
+  it('continueEndless 在没有通关可续时拒绝', async () => {
+    const h = await boot();
+    expect(h.flow.continueEndless()).toEqual({ ok: false, reason: 'nothingToContinue' });
+  });
+
+  it('通关标记随存档往返：从第 51 层读档再下层不会补一次通关', async () => {
+    const h = await atVictoryExit();
+    h.flow.descend();
+    h.flow.continueEndless();
+    h.flow.descend(); // → 51 层
+    const save = serializeRun(h.st());
+    expect(save.victoryAchieved).toBe(true);
+
+    const t = await boot({ seed: 5 });
+    t.flow.restoreRun(save);
+    expect(t.st().victoryAchieved).toBe(true);
+    expect(t.st().floorNumber).toBe(VICTORY_FLOOR + 1);
+
+    t.goto(t.byId(t.st().exitNodeId));
+    expect(t.flow.descend().victory).toBeUndefined();
+    expect(t.st().floorNumber).toBe(VICTORY_FLOOR + 2);
+  });
+
+  it('缺 victoryAchieved 的旧存档按未通关处理', async () => {
+    const h = await boot();
+    const save = serializeRun(h.st());
+    delete save.victoryAchieved;
+
+    const t = await boot({ seed: 5 });
+    t.flow.restoreRun(save);
+    expect(t.st().victoryAchieved).toBe(false);
+  });
+
+  it('通关写历史并清自动槽；无尽段死亡另记一条带标记的记录', async () => {
+    const { SaveService } = await import('../../src/persistence/saveService.js');
+    const saves = new SaveService();
+    const info = await saves.init();
+    const h = await boot({ saveService: saves });
+    h.flow.enterFloor(VICTORY_FLOOR);
+    h.goto(h.byId(h.st().exitNodeId));
+    h.flow.descend();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    let history = await saves.loadHistory();
+    expect(history).toHaveLength(1);
+    expect(history[0].outcome).toBe('victory');
+    expect(history[0].floorReached).toBe(VICTORY_FLOOR);
+    expect(history[0].victoryAchieved).toBe(true);
+    expect(await saves.loadSlot(AUTO_SAVE_SLOT)).toBeNull();
+
+    // 继续无尽后打不赢 → 另记一条 death，且带着"先通关过"的标记
+    h.flow.continueEndless();
+    h.store.update((d) => {
+      d.player.gcdSequence = [];
+      d.player.ogcdSlots = [];
+    });
+    h.goto(h.first(NODE_TYPE.COMBAT));
+    h.flow.startBattle();
+    settle(h);
+    h.flow.finishBattle();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    history = await saves.loadHistory();
+    expect(history[0].outcome).toBe('death');
+    expect(history[0].victoryAchieved).toBe(true);
+    expect(history).toHaveLength(2);
+    void info;
+  });
+
+  it('无尽可以跑到内容池覆盖不到的深度（官方模板最深 999 层）', async () => {
+    const h = await boot();
+    h.flow.enterFloor(1200);
+    h.goto(h.first(NODE_TYPE.COMBAT));
+    expect(() => h.flow.startBattle()).not.toThrow();
+    const monster = h.st().monsters[0];
+    expect(monster.hp).toBeGreaterThan(0);
+    // 深层缩放仍然生效
+    expect(monster.hp).toBeGreaterThan(50);
   });
 });

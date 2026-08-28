@@ -102,17 +102,31 @@ export function createDialog(container) {
   /**
    * 结算面板（规格 11.1）。战斗失败或通关后弹出。
    * 快照里所有文本都经 escapeHtml —— 装备名与种子来自模组，不可信任。
+   *
+   * 按钮走显式回调而不是 onClose：通关面板有两个出路（继续无尽 / 结束这局），
+   * 而 onClose 在"任何方式关闭"时都会触发，会把玩家没选的那条也执行一遍。
    */
-  function openSummary(snapshot, { outcome, onPrimary, primaryLabel = '开始新的轮回' } = {}) {
+  function openSummary(snapshot, {
+    outcome,
+    primaryLabel = '开始新的轮回',
+    onPrimary = null,
+    secondaryLabel = null,
+    onSecondary = null,
+  } = {}) {
     const won = outcome === 'victory';
     const m = snapshot.metadata;
     const player = snapshot.player;
     const sequence = player.gcdSequence.length === 0 ? '（空序列）' : player.gcdSequence.length;
+    const endlessNote =
+      won || snapshot.victoryAchieved !== true
+        ? ''
+        : '<p class="dialog-text">这一局先抵达了轮回尽头，之后是无尽段。</p>';
 
     const box = open(
       `
       <h2 tabindex="-1">${won ? '通关结算' : '探索结束'}</h2>
-      <p class="dialog-text">${won ? '这一轮轮回走到了尽头。' : '序列编织者倒在了轮回里 —— 局内成长清零。'}</p>
+      <p class="dialog-text">${won ? '你走出了第 ' + snapshot.floorNumber + ' 层 —— 这一轮轮回到此为止。' : '序列编织者倒在了轮回里 —— 局内成长清零。'}</p>
+      ${endlessNote}
       <dl class="summary-list">
         <div><dt>到达层数</dt><dd>第 ${snapshot.floorNumber} 层</dd></div>
         <div><dt>等级</dt><dd>Lv.${player.level}</dd></div>
@@ -135,13 +149,27 @@ export function createDialog(container) {
           : escapeHtml(player.ogcdSlots.map((s) => s.skillId).join('、'))
       }</p>
       <div class="dialog-actions">
-        <button type="button" data-action="close" class="btn-primary" data-autofocus>${escapeHtml(
+        ${
+          secondaryLabel === null
+            ? ''
+            : `<button type="button" data-sum="secondary" class="btn-ghost">${escapeHtml(secondaryLabel)}</button>`
+        }
+        <button type="button" data-sum="primary" class="btn-primary" data-autofocus>${escapeHtml(
           primaryLabel,
         )}</button>
       </div>
     `,
-      { closeOnBackdrop: false, escapable: false, onClose: onPrimary ?? null },
+      { closeOnBackdrop: false, escapable: false },
     );
+
+    box.querySelector('[data-sum="primary"]')?.addEventListener('click', () => {
+      close();
+      onPrimary?.();
+    });
+    box.querySelector('[data-sum="secondary"]')?.addEventListener('click', () => {
+      close();
+      onSecondary?.();
+    });
 
     return box;
   }

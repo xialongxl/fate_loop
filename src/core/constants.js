@@ -116,6 +116,17 @@ export const SHOP_OFFER_COUNT = 3;
 /** 商店同时上架的装备件数（阶段 8）。 */
 export const SHOP_GEAR_COUNT = 2;
 
+/**
+ * 终点层（P1-6 的产品决策）：在第 VICTORY_FLOOR 层使用出口即通关，
+ * 结算 outcome:'victory' 并写入历史；玩家可选择「继续挑战无尽」，
+ * 之后没有第二次结算（见 state.victoryAchieved）。
+ *
+ * 为什么是 50：按现有经验曲线实测，50 层大约 48 级，是"一局能走完、
+ * 又足够长"的位置。经验曲线与 SKILL_UNLOCK_MAX_LEVEL=120 的错配本轮不动，
+ * 数据记在交接文档附录。
+ */
+export const VICTORY_FLOOR = 50;
+
 /** 地图视口缩放范围（规格 6.5）。 */
 export const ZOOM_MIN = 0.5;
 export const ZOOM_MAX = 2.0;

@@ -294,6 +294,7 @@ export async function createApp({
     // 阵亡：GameFlow 已写历史并清自动槽
     dialog.openSummary(getSnapshot(), {
       outcome: 'death',
+      primaryLabel: '回到主菜单',
       onPrimary: () => gotoMenu(),
     });
   }
@@ -465,10 +466,16 @@ export async function createApp({
     }
     if (action === 'descend') {
       const result = flow.descend();
+      if (result.victory === true) {
+        showVictorySummary();
+        return;
+      }
       if (!result.ok) notify('这里没有通往下一层的路', 'warn');
       screens[SCREEN.MAP].resetView();
       return;
     }
+
+  
     if (action === 'battle') {
       beginBattle();
       return;
@@ -621,6 +628,22 @@ export async function createApp({
       }
       notify(`已购入，-${result.price} 碎片`, 'info');
       renderShop();
+    });
+  }
+
+  /** 通关面板：一条路继续无尽，一条路收手。两条都不伪造第二次结算。 */
+  function showVictorySummary() {
+    dialog.openSummary(getSnapshot(), {
+      outcome: 'victory',
+      primaryLabel: '继续挑战无尽',
+      onPrimary: () => {
+        const continued = flow.continueEndless();
+        if (!continued.ok) return;
+        screens[SCREEN.MAP].resetView();
+        notify('从这里开始没有尽头', 'info');
+      },
+      secondaryLabel: '结束这局',
+      onSecondary: () => gotoMenu(),
     });
   }
 

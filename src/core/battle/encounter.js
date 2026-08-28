@@ -21,15 +21,26 @@ import { ContractViolationError } from '../../utils/invariant.js';
  */
 export function pickEncounter({ seed, floorNumber, nodeId, tier, encounters }) {
   const rng = encounterStream(seed, floorNumber, nodeId);
-  const eligible = [...encounters.values()]
+  const byId = (a, b) => (a.id < b.id ? -1 : 1);
+  let eligible = [...encounters.values()]
     .filter((e) => e.tier === tier && floorNumber >= e.minFloor && floorNumber <= e.maxFloor)
-    .sort((a, b) => (a.id < b.id ? -1 : 1));
+    .sort(byId);
 
   if (eligible.length === 0) {
-    throw new ContractViolationError(`没有适用于第 ${floorNumber} 层的 ${tier} 遭遇模板`, {
-      floorNumber,
-      tier,
-    });
+    // 无尽模式可以跑到内容池覆盖不到的深度（官方模板最深到 999 层）。
+    // 与其抛错把一局好局打死，不如退回最深的那一档：取 minFloor 不超过本层的
+    // 模板中最深的一组。仍是纯函数，不消费随机数，因此不破坏确定性。
+    const ofTier = [...encounters.values()].filter((e) => e.tier === tier);
+    const reachable = ofTier.filter((e) => e.minFloor <= floorNumber).sort((a, b) => b.minFloor - a.minFloor);
+    const deepest = reachable.length > 0 ? reachable[0].minFloor : null;
+    eligible =
+      deepest === null
+        ? ofTier.slice().sort(byId)
+        : ofTier.filter((e) => e.minFloor === deepest).sort(byId);
+  }
+
+  if (eligible.length === 0) {
+    throw new ContractViolationError(`内容池里一个 ${tier} 遭遇模板都没有`, { floorNumber, tier });
   }
 
   return rng.pickWeighted(eligible);

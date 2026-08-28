@@ -14,6 +14,7 @@ import {
   SHARD_REWARD_ELITE_MULTIPLIER,
   SHOP_GEAR_COUNT,
   SHOP_OFFER_COUNT,
+  VICTORY_FLOOR,
   WINNER,
 } from './constants.js';
 import { areAdjacent } from './map/adjacency.js';
@@ -194,6 +195,11 @@ export class GameFlow {
     }
 
     const battle = state.activeBattle;
+    if (battle === null || battle === undefined) {
+      // 通关结算也会把状态写成 FINISHED + winner=PLAYER，但那不是一场战斗。
+      // 少了这道守卫，rAF 循环会在通关后再调一次 finishBattle 并踩空。
+      return { settled: false };
+    }
     const won = state.winner === WINNER.PLAYER;
 
     if (!won) {
@@ -436,11 +442,14 @@ export class GameFlow {
     return { ok: true };
   }
 
-  /** 进入下一层（规格 6.4：不可返回上一层）。 */
+  /** 进入下一层（规格 6.4：不可返回上一层）。第 VICTORY_FLOOR 层的出口是终点。 */
   descend() {
     const state = this.#store.unsafeGetState();
     if (state.currentNodeId !== state.exitNodeId) {
       return { ok: false, reason: 'notAtExit' };
+    }
+    if (state.floorNumber >= VICTORY_FLOOR && !state.victoryAchieved) {
+      return this.#settleVictory();
     }
 
     // 先把目标层数算下来：unsafeGetState() 返回的是活对象，enterFloor 会就地改它。
@@ -452,6 +461,54 @@ export class GameFlow {
     this.#audio?.play('map.floorDown', {});
     this.enterFloor(nextFloor);
     return { ok: true, floorNumber: nextFloor };
+  }
+
+  /**
+   * 通关结算（P1-6）。不再生成第 51 层：本局到此为止，玩家可以选「继续挑战无尽」。
+   *
+   * 与战败同为 FINISHED，但 winner 是 PLAYER；自动槽同样清掉 ——
+   * 留着它会让「继续游戏」把玩家放回一个已经通关、再点出口就什么都不发生的节点。
+   */
+  #settleVictory() {
+    const state = this.#store.unsafeGetState();
+    const floor = state.floorNumber;
+
+    this.#store.update((draft) => {
+      draft.metadata.floorsCleared += 1;
+      draft.victoryAchieved = true;
+      draft.status = GAME_STATUS.FINISHED;
+      draft.winner = WINNER.PLAYER;
+      draft.battleEndReason = 'victory';
+      draft.monsters = [];
+      draft.activeBattle = null;
+      pushLog(draft, `第 ${floor} 层的出口在你身后合拢 —— 轮回通关`);
+    });
+
+    this.#audio?.play('battle.victory', {});
+    this.#saveService?.appendHistory(state, { outcome: 'victory' }).catch(() => {});
+    this.#saveService?.clearRun().catch(() => {});
+    return { ok: true, victory: true, floorNumber: floor };
+  }
+
+  /**
+   * 通关后选择继续：回到探索态，之后的下层不再触发第二次结算。
+   * 层数与所有进度原样保留，因此无尽段的成绩仍会写进历史（带 victoryAchieved 标记）。
+   */
+  continueEndless() {
+    const state = this.#store.unsafeGetState();
+    if (state.victoryAchieved !== true || state.status !== GAME_STATUS.FINISHED) {
+      return { ok: false, reason: 'nothingToContinue' };
+    }
+
+    this.#store.update((draft) => {
+      draft.status = GAME_STATUS.EXPLORING;
+      draft.winner = null;
+      draft.battleEndReason = null;
+      pushLog(draft, '你选择再走一轮 —— 从这里开始没有尽头');
+    });
+
+    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    return { ok: true, floorNumber: state.floorNumber };
   }
 
   /** 当前节点对象。 */
@@ -480,6 +537,8 @@ export class GameFlow {
     this.#store.update((draft) => {
       draft.fateShards = run.fateShards ?? 0;
       draft.metadata = { ...draft.metadata, ...(run.metadata ?? {}) };
+      // 通关标记：不带回来的话，从第 51 层读档再下层会触发"第二次通关"
+      draft.victoryAchieved = run.victoryAchieved === true;
 
       // 成长与装备：exp 是等级的唯一真相源，写完统一 recalc
       draft.player.exp = run.exp ?? 0;

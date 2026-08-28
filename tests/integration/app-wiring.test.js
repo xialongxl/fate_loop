@@ -29,6 +29,7 @@ import {
   SCREEN,
   SPEED_MODES,
   STARTER_SKILL_COUNT,
+  VICTORY_FLOOR,
   WINNER,
 } from '../../src/core/constants.js';
 
@@ -319,7 +320,7 @@ describe('战斗屏接线', () => {
     expect(box.textContent).toContain('探索结束');
     expect(box.textContent).toContain('阵亡');
 
-    click(box.querySelector('[data-action="close"]'));
+    click(box.querySelector('[data-sum="primary"]'));
     expect(q('.app-dialog').hidden).toBe(true);
     expect(visibleScreen()).toBe(SCREEN.MAIN_MENU);
   });
@@ -490,7 +491,7 @@ describe('战绩屏', () => {
     standOn(app, node);
     app.beginBattle();
     app.setSpeed(SPEED_MODES.MAX);
-    click(must('.dialog-box [data-action="close"]'));
+    click(must('.dialog-box [data-sum="primary"]'));
 
     await tick();
     click(must(`[data-nav="${SCREEN.HISTORY}"]`));
@@ -675,7 +676,7 @@ describe('多局长跑', () => {
       }
       if (app.snapshot().status === GAME_STATUS.FINISHED) {
         // 阵亡：结算面板弹出 → 关闭 → 另开一局继续跑屏幕
-        click(must('.dialog-box [data-action="close"]'));
+        click(must('.dialog-box [data-sum="primary"]'));
         await tick();
         startRun(app);
         expect(app.snapshot().status).toBe(GAME_STATUS.EXPLORING);
@@ -926,5 +927,98 @@ describe('错误边界', () => {
     expect(qa('.dialog-box').length).toBe(1);
     expect(q('.dialog-box').textContent).toBe(first);
     expect(app.snapshot().error.message).toContain('第二次'); // 状态里仍是最新的
+  });
+});
+
+// ============================================================
+// 通关与无尽（P1-6 的 UI 通路）
+// ============================================================
+
+describe('通关面板', () => {
+  /** 把玩家放到终点层的出口（enterFloor 可指定层数，不必真爬 50 层）。 */
+  function standAtVictoryExit(h, floor = VICTORY_FLOOR) {
+    h.flow.enterFloor(floor);
+    const exit = nodeById(h.snapshot(), h.snapshot().exitNodeId);
+    standOn(h, exit);
+    return exit;
+  }
+
+  it('终点层的出口按钮说清楚这是通关，而不是"又一层"', () => {
+    startRun(app);
+    standAtVictoryExit(app);
+    const button = must(`${screenEl(SCREEN.MAP)} [data-action="descend"]`);
+    expect(button.textContent).toContain('轮回尽头');
+    expect(button.textContent).toContain(String(VICTORY_FLOOR));
+
+    // 普通层的出口仍是原来的说法
+    app.flow.enterFloor(3);
+    standOn(app, nodeById(app.snapshot(), app.snapshot().exitNodeId));
+    expect(q(`${screenEl(SCREEN.MAP)} [data-action="descend"]`).textContent).toContain('前往下一层');
+  });
+
+  it('点出口 → 通关结算面板：两条出路各走各的（先「继续挑战无尽」）', () => {
+    startRun(app);
+    standAtVictoryExit(app);
+    click(must(`${screenEl(SCREEN.MAP)} [data-action="descend"]`));
+
+    const box = must('.dialog-box');
+    expect(box.textContent).toContain('通关结算');
+    expect(box.textContent).toContain('通关');
+    expect(app.snapshot().status).toBe(GAME_STATUS.FINISHED);
+    expect(app.snapshot().winner).toBe(WINNER.PLAYER);
+
+    const buttons = box.querySelectorAll('[data-sum]');
+    expect(buttons).toHaveLength(2);
+    click(box.querySelector('[data-sum="primary"]')); // 继续挑战无尽
+
+    expect(q('.app-dialog').hidden).toBe(true);
+    expect(app.snapshot().status).toBe(GAME_STATUS.EXPLORING);
+    expect(app.snapshot().victoryAchieved).toBe(true);
+    expect(q(`${screenEl(SCREEN.MAP)} [data-action="descend"]`).textContent).toContain('下一层');
+
+    click(must(`${screenEl(SCREEN.MAP)} [data-action="descend"]`));
+    expect(app.snapshot().floorNumber).toBe(VICTORY_FLOOR + 1);
+  });
+
+  it('「结束这局」直接回主菜单，且不会偷偷继续', () => {
+    startRun(app);
+    standAtVictoryExit(app);
+    click(must(`${screenEl(SCREEN.MAP)} [data-action="descend"]`));
+    click(must('.dialog-box [data-sum="secondary"]'));
+
+    expect(visibleScreen()).toBe(SCREEN.MAIN_MENU);
+    expect(app.snapshot().status).toBe(GAME_STATUS.FINISHED);
+    expect(app.snapshot().victoryAchieved).toBe(true);
+  });
+
+  it('通关记录进战绩屏，并显示在「通关」筛选下', async () => {
+    startRun(app);
+    standAtVictoryExit(app);
+    click(must(`${screenEl(SCREEN.MAP)} [data-action="descend"]`));
+    await tick();
+
+    app.router.go(SCREEN.HISTORY);
+    await tick();
+    const cards = qa(`${screenEl(SCREEN.HISTORY)} .history-card`);
+    expect(cards.some((c) => c.textContent.includes('通关'))).toBe(true);
+    expect(textOf(`${screenEl(SCREEN.HISTORY)} [data-slot="summary"]`)).toMatch(/通关\s*1/);
+
+    click(must(`${screenEl(SCREEN.HISTORY)} [data-filter="victory"]`));
+    expect(qa(`${screenEl(SCREEN.HISTORY)} .history-card`)).toHaveLength(1);
+  });
+
+  it('通关后自动槽被清掉，「继续游戏」不再指向一个已通关的局', async () => {
+    const saves = new SaveService();
+    const h = await mount({ saveService: saves });
+    h.startNewRun(SEED);
+    h.flow.enterFloor(VICTORY_FLOOR);
+    standOn(h, nodeById(h.snapshot(), h.snapshot().exitNodeId));
+    h.flow.descend();
+    await tick();
+
+    expect(await saves.loadSlot(AUTO_SAVE_SLOT)).toBeNull();
+    h.gotoMenu();
+    await tick();
+    expect(h.screens[SCREEN.MAIN_MENU].element.querySelector('[data-act="continue"]').disabled).toBe(true);
   });
 });

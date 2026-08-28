@@ -101,7 +101,7 @@ export function createCodexScreen({ getPool, getUnlockTable, getSnapshot, onBack
         <div class="library-main">
           <p class="library-name">
             ${escapeHtml(skill.name)}
-            <span class="library-timing">${skill.type === SKILL_TYPE.GCD ? 'GCD' : 'oGCD'} · ${timing}</span>
+            <span class="library-timing">${timing}</span>
             ${skill.power > 0 ? `<span class="library-power">×${skill.power}</span>` : ''}
           </p>
           <p class="library-desc">${escapeHtml(skill.description)}</p>

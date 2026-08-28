@@ -151,10 +151,12 @@ export function createSequenceScreen({
       li.innerHTML = `
         <span class="seq-order">${index + 1}</span>
         <span class="seq-body">
-          <span class="seq-name">${escapeHtml(skill?.name ?? `${skillId}（缺失）`)}</span>
-          <span class="seq-meta">${skill === undefined ? '' : timing(skill)}${
-            locked ? ` · 需 Lv.${requiredLevel(skillId)}` : ''
-          }</span>
+          <span class="seq-head">
+            <span class="seq-name">${escapeHtml(skill?.name ?? `${skillId}（缺失）`)}</span>
+            <span class="seq-meta">${skill === undefined ? '' : timing(skill)}${
+              locked ? ` · 需 Lv.${requiredLevel(skillId)}` : ''
+            }</span>
+          </span>
           <span class="seq-desc">${escapeHtml(skill?.description ?? '')}</span>
         </span>
         <span class="seq-actions">
@@ -189,10 +191,12 @@ export function createSequenceScreen({
       li.innerHTML = `
         <span class="seq-order">${index + 1}</span>
         <span class="seq-body">
-          <span class="seq-name">${escapeHtml(skill?.name ?? `${slot.skillId}（缺失）`)}</span>
-          <span class="seq-meta">${skill === undefined ? '' : timing(skill)}${
-            locked ? ` · 需 Lv.${requiredLevel(slot.skillId)}` : ''
-          }</span>
+          <span class="seq-head">
+            <span class="seq-name">${escapeHtml(skill?.name ?? `${slot.skillId}（缺失）`)}</span>
+            <span class="seq-meta">${skill === undefined ? '' : timing(skill)}${
+              locked ? ` · 需 Lv.${requiredLevel(slot.skillId)}` : ''
+            }</span>
+          </span>
           <span class="seq-desc">${escapeHtml(skill?.description ?? '')}</span>
         </span>
         <label class="seq-priority">

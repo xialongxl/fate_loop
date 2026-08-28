@@ -522,14 +522,14 @@ input:focus-visible, select:focus-visible {
 
 /* 选中技能的描述：空时不占位，避免面板高度跳动 */
 .seq-desc {
-  margin: 4px 0 0;
-  padding: 6px 8px;
+  margin: 0;
+  padding: 1px 0 0 7px;
   font-size: 11px;
-  line-height: 1.6;
+  line-height: 1.5;
   color: var(--text-dim);
   background: var(--bg-inset);
   border-left: 2px solid var(--border);
-  border-radius: 0 4px 4px 0;
+  border-radius: 0 3px 3px 0;
 }
 
 .seq-desc:empty {
@@ -613,9 +613,9 @@ dd {
 
 .seq-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 4px 6px;
+  padding: 6px;
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -636,6 +636,7 @@ dd {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-dim);
+  padding-top: 2px;
 }
 
 .seq-name {
@@ -652,9 +653,14 @@ dd {
   gap: 2px;
 }
 
+.seq-actions {
+  align-self: center;
+}
+
 .seq-actions button {
-  padding: 1px 5px;
+  padding: 2px 6px;
   font-size: 10px;
+  min-width: 24px;
 }
 
 .seq-priority {
@@ -663,6 +669,8 @@ dd {
   gap: 4px;
   font-size: 11px;
   color: var(--text-dim);
+  align-self: center;
+  white-space: nowrap;
 }
 
 .seq-priority input {
@@ -1578,8 +1586,11 @@ code {
 .seq-layout {
   display: grid;
   grid-template-columns: minmax(300px, 1.05fr) minmax(300px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
-  align-items: start;
+  /* 必须 stretch：align-items:start 会让每栏按内容撑高，
+     于是列上的 overflow:auto 永不生效，整页变成要滚两屏 */
+  align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -1589,6 +1600,10 @@ code {
   flex-direction: column;
   gap: 10px;
   min-width: 0;
+  /* 滚动交给列容器：序列屏两块面板 + 技能库各自滚，整页不滚 */
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
 .seq-column.is-library {
@@ -1598,19 +1613,29 @@ code {
 .seq-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
+/* 序列列表自然展开。这里的 max-height 是从阶段 6 的窄侧栏继承来的
+   （旧值 190px），在全屏界面里只会把列表切成带无意义滚动条的小窗。 */
 .seq-list {
-  max-height: 260px;
+  max-height: none;
+}
+
+.seq-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 .seq-meta {
-  display: flex;
-  gap: 8px;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .seq-summary {
@@ -1679,8 +1704,10 @@ code {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* 高度由所在列决定（列已是 flex 容器），不再用 vh 硬顶一个窗口出来 */
+  flex: 1 1 auto;
+  min-height: 120px;
   overflow-y: auto;
-  max-height: 52vh;
 }
 
 .library-item,
@@ -1752,6 +1779,7 @@ code {
 .equip-layout {
   display: grid;
   grid-template-columns: minmax(230px, 0.9fr) minmax(230px, 1.1fr) minmax(240px, 1fr);
+  grid-template-rows: minmax(0, auto);
   gap: 12px;
   align-items: start;
   flex: 1 1 auto;
@@ -2239,6 +2267,27 @@ code {
 @media (max-width: 900px) {
   .screen-map {
     flex-direction: column;
+  }
+
+  /* 窄屏单栏时让整页自然流：显式行轨道 minmax(0,1fr) 会把列压成 0 高，
+     而 overflow:visible 的溢出会画到下一块面板上 */
+  .seq-layout,
+  .equip-layout,
+  .battle-body {
+    grid-template-rows: none;
+    align-items: start;
+    flex: 0 0 auto;
+    height: auto;
+  }
+
+  .seq-column {
+    overflow: visible;
+  }
+
+  .bag-list,
+  .library-list {
+    max-height: 60vh;
+    min-height: 0;
   }
 
   .map-side {

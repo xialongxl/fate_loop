@@ -14,10 +14,12 @@ import {
   GROWTH_PER_LEVEL,
   MAX_LEVEL,
   PLAYER_BASE,
+  SKILL_FAMILIES,
   SKILL_TYPE,
   SKILL_UNLOCK_MAX_LEVEL,
   STARTER_GCD_COUNT,
   STARTER_OGCD_COUNT,
+  UNGROUPED_FAMILY,
 } from './constants.js';
 
 /**
@@ -112,6 +114,56 @@ export function battleExpReward({ monsterCount, floorNumber, isElite }) {
   return Math.max(1, Math.floor(base * (isElite ? EXP_REWARD.ELITE_MULTIPLIER : 1)));
 }
 
+/** 取技能所属流派：tags 里第一个命中的登记流派；都没有则 untagged。 */
+export function familyOf(skill) {
+  const tags = skill?.tags ?? [];
+  for (const family of SKILL_FAMILIES) {
+    if (tags.includes(family)) return family;
+  }
+  return UNGROUPED_FAMILY;
+}
+
+function byCostThenId(cost) {
+  return (a, b) => {
+    if (cost(a) !== cost(b)) return cost(a) - cost(b);
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  };
+}
+
+/**
+ * 排一个类型（GCD 或 oGCD）的“解锁次序”。
+ *
+ * GCD 走**流派轮转**：先各流派最便宜的一个（按 SKILL_FAMILIES 顺序），再各第二个……
+ * 为什么不能按全局代价排：同一家族的技能代价往往挤在同一档，线性铺开会让它们
+ * 连成一片、家族之间留下 40~50 级的空洞 —— 实测雷霆系 1 级拿到雷火星后，
+ * 下一个要到 54 级，等于“想玩一个流派”在中期完全不成立。
+ * 轮转后同族相邻两个技能的间隔约等于“总档位 / 家族数”，玩家可以顺着一个流派build。
+ *
+ * oGCD 走代价排序：内容池里 30 个 oGCD 有 23 个没打流派标签（内容待办，
+ * 见交接文档），对它们轮转只是在排 untagged 一坠，没有意义。
+ */
+function orderByUnlock(list, cost, roundRobin) {
+  if (!roundRobin) return list.sort(byCostThenId(cost));
+
+  const groups = new Map();
+  for (const skill of list) {
+    const family = familyOf(skill);
+    if (!groups.has(family)) groups.set(family, []);
+    groups.get(family).push(skill);
+  }
+  for (const skills of groups.values()) skills.sort(byCostThenId(cost));
+
+  const order = [...SKILL_FAMILIES, UNGROUPED_FAMILY].filter((family) => groups.has(family));
+  const out = [];
+  for (let rank = 0; out.length < list.length; rank += 1) {
+    for (const family of order) {
+      const skill = groups.get(family)[rank];
+      if (skill !== undefined) out.push(skill);
+    }
+  }
+  return out;
+}
+
 /**
  * 技能解锁等级表。
  *
@@ -133,18 +185,27 @@ export function buildUnlockTable(skills) {
   const all = [...skills.values()];
 
   const buckets = [
-    { type: SKILL_TYPE.GCD, starter: STARTER_GCD_COUNT, cost: (s) => s.gcdCostMs ?? 0 },
-    { type: SKILL_TYPE.OGCD, starter: STARTER_OGCD_COUNT, cost: (s) => s.cooldownMs ?? 0 },
+    {
+      type: SKILL_TYPE.GCD,
+      starter: STARTER_GCD_COUNT,
+      cost: (s) => s.gcdCostMs ?? 0,
+      roundRobin: true,
+    },
+    {
+      type: SKILL_TYPE.OGCD,
+      starter: STARTER_OGCD_COUNT,
+      cost: (s) => s.cooldownMs ?? 0,
+      roundRobin: false,
+    },
   ];
 
   const claimed = new Set();
-  for (const { type, starter, cost } of buckets) {
-    const list = all
-      .filter((skill) => skill.type === type && !claimed.has(skill.id))
-      .sort((a, b) => {
-        if (cost(a) !== cost(b)) return cost(a) - cost(b);
-        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-      });
+  for (const { type, starter, cost, roundRobin } of buckets) {
+    const list = orderByUnlock(
+      all.filter((skill) => skill.type === type && !claimed.has(skill.id)),
+      cost,
+      roundRobin,
+    );
     for (const skill of list) claimed.add(skill.id);
 
     const gated = Math.max(0, list.length - starter);

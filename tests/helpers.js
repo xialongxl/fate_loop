@@ -64,10 +64,11 @@ export async function loadOfficialPool() {
  */
 export const TEST_GCD_SEQUENCE = [
   'blade.jab',
-  'blade.disarm',
   'fire.spark',
   'frost.shard',
   'shadow.touch',
+  'thunder.spark',
+  'order.emergencyCare',
 ];
 
 export const TEST_OGCD_SLOTS = [

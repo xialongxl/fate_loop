@@ -8,19 +8,11 @@
  *   3. 每个技能显示完整描述、倍率、时长、标签，不再只有 tooltip。
  */
 
-import { OGCD_SLOT_LIMIT, SKILL_TYPE } from '../../core/constants.js';
+import { OGCD_SLOT_LIMIT, SKILL_FAMILY_LABELS, SKILL_TYPE } from '../../core/constants.js';
 import { escapeHtml } from '../format.js';
 
-/** 流派标签 → 中文名。用于筛选按钮。 */
-const FAMILY_LABELS = Object.freeze({
-  all: '全部',
-  physical: '斩击',
-  fire: '烈焰',
-  frost: '霜寒',
-  shadow: '幽影',
-  thunder: '雷霆',
-  order: '秩序',
-});
+/** 筛选按钮：「全部」+ 各流派，中文名取自 core 的唯一来源。 */
+const FAMILY_LABELS = Object.freeze({ all: '全部', ...SKILL_FAMILY_LABELS });
 
 export function createSequenceScreen({
   getState,

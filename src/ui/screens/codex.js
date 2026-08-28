@@ -9,7 +9,7 @@
  * 死亡即清零（equipment.js 的注释里写明了不引入局外养成的理由）。
  */
 
-import { SKILL_TYPE } from '../../core/constants.js';
+import { SKILL_FAMILIES, SKILL_FAMILY_LABELS, SKILL_TYPE } from '../../core/constants.js';
 import { RARITIES } from '../../core/constants.js';
 import { describeGear, rollEquipment } from '../../core/equipment.js';
 import { mulberry32 } from '../../core/prng.js';
@@ -23,13 +23,12 @@ const TABS = [
   { id: 'other', label: '商品与事件' },
 ];
 
+/**
+ * 标签 → 中文名。流派部分取自 core 的唯一来源；其余是技能上的辅助标签
+ * （起手/爆发…），只用于展示，不参与解锁轮转。
+ */
 const FAMILY_LABELS = Object.freeze({
-  physical: '斩击',
-  fire: '烈焰',
-  frost: '霜寒',
-  shadow: '幽影',
-  thunder: '雷霆',
-  order: '秩序',
+  ...SKILL_FAMILY_LABELS,
   blade: '锋刃',
   opener: '起手',
   burst: '爆发',
@@ -38,8 +37,11 @@ const FAMILY_LABELS = Object.freeze({
   ogcd: '插入',
 });
 
-/** 流派筛选按钮的固定顺序（只列出当前分类里真实存在的标签）。 */
-const FAMILY_ORDER = Object.freeze(Object.keys(FAMILY_LABELS));
+/** 流派筛选按钮的固定顺序：先六个真流派，再其余标签。 */
+const FAMILY_ORDER = Object.freeze([
+  ...SKILL_FAMILIES,
+  ...Object.keys(FAMILY_LABELS).filter((k) => !SKILL_FAMILIES.includes(k)),
+]);
 
 export function createCodexScreen({ getPool, getUnlockTable, getSnapshot, onBack }) {
   const element = document.createElement('section');

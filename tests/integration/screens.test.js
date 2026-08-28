@@ -144,13 +144,17 @@ describe('序列屏交互', () => {
     });
     app.router.go(SCREEN.SEQUENCE);
 
-    const locked = [...app.pool.skills.values()].find(
-      (s) => s.type === 'GCD' && (app.unlockTable.get(s.id) ?? 1) > 1,
-    );
+    // 要的是"1 级锁着、20 级已解锁"的技能：只按 >1 挑会挑到 57 级才解锁的
+    // blade.slash，20 级仍然锁着，测试前提就空了
+    const locked = [...app.pool.skills.values()].find((skill) => {
+      const need = app.unlockTable.get(skill.id) ?? 1;
+      return skill.type === 'GCD' && need > 1 && need <= 20;
+    });
+    expect(locked).toBeDefined();
     const search = q(`${root(SCREEN.SEQUENCE)} [data-slot="search"]`);
     search.value = locked.id;
     search.dispatchEvent(new window.Event('input', { bubbles: true }));
-    const add = q(`${root(SCREEN.SEQUENCE)} [data-add="${locked.id}"]`);
+    const add = must(`${root(SCREEN.SEQUENCE)} [data-add="${locked.id}"]`);
     expect(add.disabled).toBe(false);
 
     click(add);

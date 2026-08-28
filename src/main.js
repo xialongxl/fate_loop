@@ -68,21 +68,23 @@ const MOVE_DENY = Object.freeze({
 });
 
 /**
- * 默认开局序列。
+ * 默认开局序列 = 开局解锁的全部 6 个 GCD，**每个流派各一个**。
  *
- * 必须是 1 级就合法的组合。解锁表按类型分名额（前 6 个 GCD + 前 4 个 oGCD
- * 在 1 级），因此 5 个低代价起手 GCD 加一个自保插入技是合法且可用的开局。
- * 旧默认里的 blade.slash(7) / riposte(6) / cleave(41) 与 ogcd.emergencyHeal(94)
- * 在 1 级都是非法的 —— 交接文档 P1-2 提醒的正是这件事。
+ * 为什么正好六个：解锁表按流派轮转分配 starter 名额（SKILL_FAMILIES 六个流派 ×
+ * 家族内最便宜的一个），所以 1 级就能摸到每个流派的手感，而不是"物理系打到底、
+ * 其他系全锁着"。
  *
- * 改这里之前先看一眼胜率守卫：tests/integration/balance.test.js。
+ * 实测（6 种子 × 第 1~3 层全部战斗节点）：带上 order.emergencyCare 这套是 97%，
+ * 换成不含治疗的组合掉到 86% —— 治疗 GCD 就是开局存活的关键，别随便删。
+ * 改这里之前先看 tests/integration/balance.test.js 的胜率下限与流派覆盖断言。
  */
 export const DEFAULT_GCD_SEQUENCE = Object.freeze([
   'blade.jab',
-  'blade.disarm',
   'fire.spark',
   'frost.shard',
   'shadow.touch',
+  'thunder.spark',
+  'order.emergencyCare',
 ]);
 export const DEFAULT_OGCD_SLOTS = Object.freeze([
   // 自保优先：残血时振奋（短冷却自我治疗）抢到最前

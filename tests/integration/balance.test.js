@@ -13,8 +13,15 @@
 import { describe, expect, it } from 'vitest';
 import { createHarness, loadOfficialPool } from '../helpers.js';
 import { DEFAULT_GCD_SEQUENCE, DEFAULT_OGCD_SLOTS } from '../../src/main.js';
-import { buildUnlockTable } from '../../src/core/progression.js';
-import { NODE_TYPE, SKILL_TYPE, STARTER_GCD_COUNT, STARTER_OGCD_COUNT } from '../../src/core/constants.js';
+import { TEST_GCD_SEQUENCE, TEST_OGCD_SLOTS } from '../helpers.js';
+import { buildUnlockTable, familyOf } from '../../src/core/progression.js';
+import {
+  NODE_TYPE,
+  SKILL_FAMILIES,
+  SKILL_TYPE,
+  STARTER_GCD_COUNT,
+  STARTER_OGCD_COUNT,
+} from '../../src/core/constants.js';
 
 const SEEDS = [1, 7, 42, 999, 20240101, 31337];
 const FLOORS = [1, 2, 3];
@@ -77,6 +84,22 @@ describe('解锁表给 1 级留出两类手段', () => {
         /heal|恢复|治疗|吸|wind|feast/i.test(`${s.name}${s.description}`),
     );
     expect(healAtOne.length).toBeGreaterThan(0);
+  });
+
+  it('默认开局序列覆盖全部流派（各一个），而不是全堆在物理系', async () => {
+    const pool = await loadOfficialPool();
+    const covered = DEFAULT_GCD_SEQUENCE.map((id) => familyOf(pool.skills.get(id)));
+    expect([...new Set(covered)].sort()).toEqual([...SKILL_FAMILIES].sort());
+  });
+
+  it('测试脚手架用的序列也 1 级合法（否则 sanitizeSequence 会把它洗掉，白测）', async () => {
+    const pool = await loadOfficialPool();
+    const table = buildUnlockTable(pool.skills);
+    const illegal = [
+      ...TEST_GCD_SEQUENCE.filter((id) => (table.get(id) ?? 1) > 1),
+      ...TEST_OGCD_SLOTS.filter((slot) => (table.get(slot.skillId) ?? 1) > 1).map((slot) => slot.skillId),
+    ];
+    expect(illegal).toEqual([]);
   });
 
   it('默认开局序列在 1 级全部合法', async () => {

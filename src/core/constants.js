@@ -192,6 +192,26 @@ export const EXP_REWARD = Object.freeze({
   ELITE_MULTIPLIER: 2,
 });
 
+/**
+ * 技能流派。唯一来源：解锁表的轮转、序列屏与图鉴的筛选按钮都读这里。
+ * （此前这两份中文名在 sequenceScreen.js 与 codex.js 里各拄了一遍，改一处漏一处。）
+ * 顺序即解锁轮转的次序，也是筛选按钮的展示顺序 —— 不要随意调整。
+ */
+export const SKILL_FAMILIES = Object.freeze(['physical', 'fire', 'frost', 'shadow', 'thunder', 'order']);
+
+/** 流派 id → 中文名。 */
+export const SKILL_FAMILY_LABELS = Object.freeze({
+  physical: '斩击',
+  fire: '烈焰',
+  frost: '霜寒',
+  shadow: '幽影',
+  thunder: '雷霆',
+  order: '秩序',
+});
+
+/** 没有任一流派标签的技能归到这里，轮转时排最后。 */
+export const UNGROUPED_FAMILY = 'untagged';
+
 /** 技能解锁：等级门槛的上限（最后一个技能在此级解锁）。 */
 export const SKILL_UNLOCK_MAX_LEVEL = 120;
 

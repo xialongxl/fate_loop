@@ -9,6 +9,7 @@ import {
   baseStatsAtLevel,
   battleExpReward,
   buildUnlockTable,
+  familyOf,
   expProgress,
   expToNextLevel,
   isSkillUnlocked,
@@ -21,7 +22,9 @@ import {
   GROWTH_PER_LEVEL,
   MAX_LEVEL,
   PLAYER_BASE,
+  SKILL_FAMILIES,
   STARTER_SKILL_COUNT,
+  UNGROUPED_FAMILY,
 } from '../../src/core/constants.js';
 import { loadOfficialPool } from '../helpers.js';
 
@@ -237,5 +240,68 @@ describe('技能解锁表', () => {
     }
     // 满级解锁全部
     expect(unlockedSkillIds(table, pool.skills, MAX_LEVEL).length).toBe(pool.skills.size);
+  });
+});
+
+describe('流派解锁的均匀性（防止"某流派 1 级到 54 级才第二个"）', () => {
+  /** 按流派分组，返回 family → 升序解锁等级数组。 */
+  function levelsByFamily(pool, { type }) {
+    const table = buildUnlockTable(pool.skills);
+    const groups = new Map();
+    for (const skill of pool.skills.values()) {
+      if (skill.type !== type) continue;
+      const family = familyOf(skill);
+      if (!groups.has(family)) groups.set(family, []);
+      groups.get(family).push(table.get(skill.id));
+    }
+    for (const list of groups.values()) list.sort((a, b) => a - b);
+    return groups;
+  }
+
+  const MAX_FAMILY_GAP = 15;
+
+  it('每个流派在 1 级都至少有一个 GCD（开局就摸得到所有流派）', async () => {
+    const pool = await loadOfficialPool();
+    const groups = levelsByFamily(pool, { type: 'GCD' });
+    expect([...groups.keys()].sort()).toEqual(
+      [...SKILL_FAMILIES].sort().concat([...groups.keys()].filter((f) => !SKILL_FAMILIES.includes(f)).sort()),
+    );
+    for (const [family, levels] of groups) {
+      expect(levels[0], `${family} 的第一个 GCD`).toBe(1);
+    }
+  });
+
+  it(`同流派相邻两个 GCD 的解锁空档不超过 ${MAX_FAMILY_GAP} 级`, async () => {
+    const pool = await loadOfficialPool();
+    const groups = levelsByFamily(pool, { type: 'GCD' });
+    for (const [family, levels] of groups) {
+      for (let i = 1; i < levels.length; i += 1) {
+        expect(levels[i] - levels[i - 1], `${family} 第 ${i} 档空档`).toBeLessThanOrEqual(MAX_FAMILY_GAP);
+      }
+    }
+  });
+
+  it('familyOf 认标签也认兜底：没有流派标签的技能进 untagged', () => {
+    expect(familyOf({ tags: ['thunder', 'opener'] })).toBe('thunder');
+    expect(familyOf({ tags: ['ogcd', 'burst'] })).toBe(UNGROUPED_FAMILY);
+    expect(familyOf({})).toBe(UNGROUPED_FAMILY);
+  });
+
+  it('轮转不打乱家族内部的"代价低者先解锁"', async () => {
+    const pool = await loadOfficialPool();
+    const table = buildUnlockTable(pool.skills);
+    for (const family of SKILL_FAMILIES) {
+      const list = [...pool.skills.values()].filter(
+        (s) => s.type === 'GCD' && familyOf(s) === family,
+      );
+      const sorted = [...list].sort((a, b) => a.gcdCostMs - b.gcdCostMs);
+      for (let i = 1; i < sorted.length; i += 1) {
+        if (sorted[i].gcdCostMs === sorted[i - 1].gcdCostMs) continue;
+        expect(
+          table.get(sorted[i].id) >= table.get(sorted[i - 1].id),
+          `${family}: 更贵的 ${sorted[i].id} 不该比 ${sorted[i - 1].id} 先解锁`,
+        ).toBe(true);
+      }
+    }
   });
 });

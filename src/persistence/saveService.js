@@ -38,9 +38,19 @@ export class SaveService {
   #flushScheduled = false;
   #flushing = null;
   #errorListeners = new Set();
+  #modded = false;
+  /** 内容指纹提供者：由装配层注入（它才知道池子长什么样），存档要带这份凭据。 */
+  #fingerprint = null;
 
-  async init() {
-    const { adapter, degraded, attempts = [] } = await pickAdapter();
+  /**
+   * @param {object} [options]
+   * @param {boolean} [options.modded] 启用了运行时包 ⇒ 存档写进独立命名空间。
+   *   今天恒为 false（还没有运行时加载），但**命名空间的切分要早于工坊**：
+   *   等真有包时再改库名，等于把玩家已有存档留在另一个库里。
+   */
+  async init({ modded = false } = {}) {
+    this.#modded = modded;
+    const { adapter, degraded, attempts = [] } = await pickAdapter({ modded });
     this.#adapter = adapter;
     this.#degraded = degraded;
     // 清理 v1 遗留的单键存档，避免存档界面出现读不出来的幽灵条目
@@ -68,6 +78,29 @@ export class SaveService {
 
   get adapterKind() {
     return this.#adapter?.kind ?? 'none';
+  }
+
+  /** 当前是否运行在 modded 命名空间。 */
+  get modded() {
+    return this.#modded;
+  }
+
+  /**
+   * 注入内容指纹提供者。SaveService 不认识内容池，所以由装配层给一个函数
+   * （每次写档时调用），避免持久层反向依赖 core。
+   * @param {() => {hash:string, mods:Array, packs:Array}} provider
+   */
+  provideFingerprint(provider) {
+    this.#fingerprint = typeof provider === 'function' ? provider : null;
+    return this;
+  }
+
+  /** 写档时附带的凭据。没有 provider 时返回空对象（测试与早期启动阶段）。 */
+  #credentials() {
+    if (this.#fingerprint === null) return {};
+    const fp = this.#fingerprint();
+    if (fp === null || fp === undefined) return {};
+    return { contentHash: fp.hash, contentMods: fp.mods ?? [], contentPacks: fp.packs ?? [] };
   }
 
   onError(listener) {
@@ -98,6 +131,7 @@ export class SaveService {
     const record = {
       slotId,
       savedAt: Date.now(),
+      ...this.#credentials(),
       data: serializeRun(state),
     };
     return this.enqueue(slotKey(slotId), record);
@@ -110,7 +144,14 @@ export class SaveService {
     const pendingRecord = this.#pending.get(slotKey(slotId));
     const record = pendingRecord ?? (await this.#adapter.get(slotKey(slotId)));
     if (record === null || record === undefined) return null;
-    return { savedAt: record.savedAt ?? null, run: deserializeRun(record.data ?? record) };
+    // 记录级凭据要一起带出去：调用方要靠 contentHash 判断"这存档是不是别的内容集写的"
+    return {
+      savedAt: record.savedAt ?? null,
+      contentHash: record.contentHash ?? null,
+      contentMods: record.contentMods ?? [],
+      contentPacks: record.contentPacks ?? [],
+      run: deserializeRun(record.data ?? record),
+    };
   }
 
   /** 列出全部槽位的摘要。缺失槽返回 { slotId, empty: true }。 */
@@ -173,7 +214,11 @@ export class SaveService {
   async appendHistory(state, { outcome }) {
     if (this.#adapter === null) await this.init();
     const existing = (await this.#adapter.get(HISTORY_KEY)) ?? [];
-    const entry = { ...createHistoryEntry(state, { outcome }), recordedAt: Date.now() };
+    const entry = {
+      ...createHistoryEntry(state, { outcome }),
+      ...this.#credentials(),
+      recordedAt: Date.now(),
+    };
     const next = [entry, ...existing].slice(0, 50);
     await this.#adapter.set(HISTORY_KEY, next);
     return next;

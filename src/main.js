@@ -33,6 +33,7 @@ import { GameFlow } from './core/game.js';
 import { SKILL_FAMILY_LABELS } from './core/constants.js';
 import { describeGear, rarityOf } from './core/equipment.js';
 import { SaveService } from './persistence/saveService.js';
+import { computeContentFingerprint, fingerprintMatches } from './persistence/contentFingerprint.js';
 import { defaultSettings } from './persistence/schema.js';
 import { HowlerAudio } from './ui/audio/howlerAudio.js';
 import { nullAudio } from './ui/audio/nullAudio.js';
@@ -137,8 +138,8 @@ export async function createApp({
     registry,
   });
 
-  const loaded = await loadMods({ registry, modules });
-  pool = loaded.pool;
+  const modLoad = await loadMods({ registry, modules });
+  pool = modLoad.pool;
   engine = new BattleEngine({ store, registry, pool });
 
   await audio.init?.();
@@ -146,6 +147,13 @@ export async function createApp({
 
   const storageInfo = await saveService.init();
   const flow = new GameFlow({ store, engine, pool, saveService, audio });
+
+  /**
+   * 内容指纹（S1）。结果 = f(种子, 序列, 内容池)，所以分享种子必须连带分享指纹，
+   * 读档也必须能看出"这份存档来自另一个内容集"。
+   */
+  const fingerprint = computeContentFingerprint(pool, { mods: modLoad.loaded });
+  saveService.provideFingerprint(() => fingerprint);
   /** 解锁表由 GameFlow 持有（它要在开战前用它洗序列），屏幕共用同一张。 */
   const unlockTable = flow.unlockTable;
   /** 流派中文名：core 官方标签 + 各模组（含 dev 示例包）注册的流派。 */
@@ -338,6 +346,7 @@ export async function createApp({
     // 阵亡：GameFlow 已写历史并清自动槽
     dialog.openSummary(getSnapshot(), {
       outcome: 'death',
+      contentHash: fingerprint.hash,
       primaryLabel: '回到主菜单',
       onPrimary: () => gotoMenu(),
     });
@@ -363,6 +372,7 @@ export async function createApp({
       onNodeActivate: safe((nodeId) => void handleNodeActivate(nodeId)),
       onNodeAction: safe((action) => void handleNodeAction(action)),
       onSeedChange: safe((text) => void handleSeedChange(text)),
+      getContentFingerprint: () => fingerprint,
     }),
 
     [SCREEN.BATTLE]: createBattleScreen({
@@ -404,12 +414,14 @@ export async function createApp({
     [SCREEN.SAVES]: createSavesScreen({
       listSlots: () => saveService.listSlots(),
       canSave: canWriteSave,
+      getCurrentHash: () => fingerprint.hash,
       onLoad: async (slotId) => {
         const loadedSlot = await saveService.loadSlot(slotId);
         if (loadedSlot === null) {
           notify('该槽位是空的', 'warn');
           return;
         }
+        if (!(await confirmContentMismatch(loadedSlot))) return;
         restoreRun(loadedSlot.run);
         notify(`已读取${slotId === AUTO_SAVE_SLOT ? '自动' : '手动'}存档`, 'info');
       },
@@ -681,6 +693,7 @@ export async function createApp({
   function showVictorySummary() {
     dialog.openSummary(getSnapshot(), {
       outcome: 'victory',
+      contentHash: fingerprint.hash,
       primaryLabel: '继续挑战无尽',
       onPrimary: () => {
         const continued = flow.continueEndless();
@@ -854,7 +867,28 @@ export async function createApp({
       notify('没有可继续的自动存档', 'warn');
       return;
     }
+    if (!(await confirmContentMismatch(loadedSlot))) return;
     restoreRun(loadedSlot.run);
+  }
+
+  /**
+   * 存档来自另一个内容集时要问一句 —— 否则玩家会遇到"技能凭空消失"，
+   * 而那是 sanitizeSequence 在正常工作，不是 bug。
+   */
+  async function confirmContentMismatch(record) {
+    const { status, saved, current } = fingerprintMatches(record, fingerprint.hash);
+    if (status === 'match') return true;
+    // 没有指纹字段 = S1 之前存的档。拦它一次就等于拦每个老玩家一次，
+    // 所以只提示不拦；真正要拦的是"指纹存在且不同"。
+    if (status === 'unknown') {
+      notify('这份存档没有内容指纹记录（早于该功能），读档后若技能对不上属正常', 'info');
+      return true;
+    }
+    return confirm(
+      `这份存档来自另一个内容集（存档 ${saved}，当前 ${current}）。` +
+        '读档后未解锁或不存在的技能会被自动剔除。仍要读取吗？',
+      { confirmLabel: '仍然读取', cancelLabel: '取消' },
+    );
   }
 
   async function gotoMenuConfirmed() {
@@ -979,6 +1013,7 @@ export async function createApp({
     dialog,
     shell,
     unlockTable,
+    fingerprint,
     get speed() {
       return speed;
     },

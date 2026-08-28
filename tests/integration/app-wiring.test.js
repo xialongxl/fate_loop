@@ -1091,3 +1091,108 @@ describe('地图视图', () => {
     expect(document.querySelector(`${screenEl(SCREEN.MAP)} .map-viewport`).getAttribute('transform')).toBe(touched);
   });
 });
+
+// ============================================================
+// 内容指纹（S1）在 UI 上的三条通路
+// ============================================================
+
+/** 包一层真 SaveService，只改 loadSlot/listSlots 里的 contentHash。 */
+function hashOverrideSaves(hash) {
+  const real = new SaveService();
+  const boot = real.init().then((info) => info);
+  const patch = (record) => (record === null ? null : { ...record, contentHash: hash });
+  return {
+    real,
+    api: {
+      get degraded() {
+        return false;
+      },
+      get modded() {
+        return false;
+      },
+      init: () => boot,
+      provideFingerprint: (p) => real.provideFingerprint(p),
+      loadSettings: () => real.loadSettings(),
+      saveSettings: (x) => real.saveSettings(x),
+      saveToSlot: (id, s) => real.saveToSlot(id, s),
+      saveRun: (s) => real.saveRun(s),
+      listSlots: async () => (await real.listSlots()).map((s) => ({ ...s, contentHash: hash })),
+      deleteSlot: (id) => real.deleteSlot(id),
+      appendHistory: (s, o) => real.appendHistory(s, o),
+      loadHistory: () => real.loadHistory(),
+      clearRun: () => real.clearRun(),
+      clearAll: () => real.clearAll(),
+      flush: () => real.flush(),
+      loadSlot: async (id) => patch(await real.loadSlot(id)),
+    },
+  };
+}
+
+describe('内容指纹', () => {
+  it('地图屏种子面板显示本局指纹（玩家抄种子时就该看见它）', () => {
+    startRun(app);
+    expect(textOf(`${screenEl(SCREEN.MAP)} [data-slot="fingerprint"]`)).toMatch(
+      /本局内容指纹 [0-9a-f]{8}/,
+    );
+    expect(app.fingerprint.hash).toMatch(/^[0-9a-f]{8}$/);
+    expect(app.fingerprint.mods.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('结算面板带内容指纹一行', () => {
+    startRun(app);
+    app.store.update((d) => {
+      d.player.gcdSequence = [];
+      d.player.ogcdSlots = [];
+    });
+    const node = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.COMBAT);
+    standOn(app, node);
+    app.beginBattle();
+    app.setSpeed(SPEED_MODES.MAX);
+    const box = must('.dialog-box');
+    expect(box.textContent).toContain('内容指纹');
+    expect(box.textContent).toContain(app.fingerprint.hash);
+  });
+
+  it('读档遇到别的指纹要先问一句，取消就不动当前局', async () => {
+    const { real, api } = hashOverrideSaves('deadbeef');
+    const h = await mount({ saveService: api });
+    h.startNewRun(SEED);
+    await tick();
+    real.provideFingerprint(() => ({ hash: 'deadbeef', mods: [], packs: [] }));
+    real.saveRun(h.snapshot());
+    await real.flush();
+
+    h.gotoMenu();
+    await tick();
+    click(must('[data-act="continue"]'));
+    await tick();
+    const box = must('.dialog-box');
+    expect(box.textContent).toContain('另一个内容集');
+    expect(box.textContent).toContain('deadbeef');
+
+    click(box.querySelector('[data-cancel]'));
+    await tick();
+    expect(visibleScreen()).toBe(SCREEN.MAIN_MENU);
+
+    // 确认后才真的读
+    click(must('[data-act="continue"]'));
+    await tick();
+    click(must('.dialog-box [data-confirm]')); // createConfirm 的确认按钮
+    await tick();
+    expect(visibleScreen()).toBe(SCREEN.MAP);
+  });
+
+  it('存档列表给不符的槽位打标记', async () => {
+    const { real, api } = hashOverrideSaves('ffff0000');
+    const h = await mount({ saveService: api });
+    h.startNewRun(SEED);
+    real.saveRun(h.snapshot());
+    await real.flush();
+
+    h.router.go(SCREEN.SAVES);
+    await tick();
+    expect(qa(`${screenEl(SCREEN.SAVES)} .slot-tag.is-warn`).length).toBeGreaterThan(0);
+    // 自动槽才有内容指纹（saveRun 写的是 auto），所以查所有卡片而不是第一张
+    expect(qa(`${screenEl(SCREEN.SAVES)} .slot-card`).map((c) => c.textContent).join(' ')).toContain('ffff0000');
+  });
+});

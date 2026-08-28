@@ -3,11 +3,16 @@
  * 触发场景：隐私模式禁用 IndexedDB、配额耗尽、旧浏览器。
  */
 
-const PREFIX = 'fate-loop:';
+const PREFIXES = Object.freeze({ vanilla: 'fate-loop:', modded: 'fate-loop-modded:' });
 
 export class LocalStorageAdapter {
   kind = 'localstorage';
   lastError = null;
+  #prefix;
+  constructor(namespace = 'vanilla') {
+    this.namespace = namespace === 'modded' ? 'modded' : 'vanilla';
+    this.#prefix = PREFIXES[this.namespace];
+  }
 
   async isAvailable() {
     try {
@@ -15,7 +20,7 @@ export class LocalStorageAdapter {
         this.lastError = 'localStorage 未定义';
         return false;
       }
-      const probe = `${PREFIX}__probe__`;
+      const probe = `${this.#prefix}__probe__`;
       localStorage.setItem(probe, '1');
       localStorage.removeItem(probe);
       this.lastError = null;
@@ -28,7 +33,7 @@ export class LocalStorageAdapter {
   }
 
   async get(key) {
-    const raw = localStorage.getItem(PREFIX + key);
+    const raw = localStorage.getItem(this.#prefix + key);
     if (raw === null) return undefined;
     try {
       return JSON.parse(raw);
@@ -38,18 +43,18 @@ export class LocalStorageAdapter {
   }
 
   async set(key, value) {
-    localStorage.setItem(PREFIX + key, JSON.stringify(value));
+    localStorage.setItem(this.#prefix + key, JSON.stringify(value));
   }
 
   async delete(key) {
-    localStorage.removeItem(PREFIX + key);
+    localStorage.removeItem(this.#prefix + key);
   }
 
   async keys() {
     const out = [];
     for (let i = 0; i < localStorage.length; i += 1) {
       const key = localStorage.key(i);
-      if (key !== null && key.startsWith(PREFIX)) out.push(key.slice(PREFIX.length));
+      if (key !== null && key.startsWith(this.#prefix)) out.push(key.slice(this.#prefix.length));
     }
     return out.sort();
   }

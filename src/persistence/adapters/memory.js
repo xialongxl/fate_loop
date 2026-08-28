@@ -3,6 +3,9 @@
 export class MemoryAdapter {
   kind = 'memory';
   #map = new Map();
+  constructor(namespace = 'vanilla') {
+    this.namespace = namespace === 'modded' ? 'modded' : 'vanilla';
+  }
 
   async isAvailable() {
     return true;

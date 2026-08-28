@@ -13,7 +13,15 @@ import { escapeHtml, formatNumber, formatTimestamp } from '../format.js';
 import { slotLabel } from '../../persistence/schema.js';
 import { levelFromTotalExp } from '../../core/progression.js';
 
-export function createSavesScreen({ onLoad, onSave, onDelete, onBack, listSlots, canSave }) {
+export function createSavesScreen({
+  onLoad,
+  onSave,
+  onDelete,
+  onBack,
+  listSlots,
+  canSave,
+  getCurrentHash = null,
+}) {
   const element = document.createElement('section');
   element.className = 'screen-saves';
   element.innerHTML = `
@@ -61,6 +69,12 @@ export function createSavesScreen({ onLoad, onSave, onDelete, onBack, listSlots,
     }
 
     const level = levelFromTotalExp(slot.exp ?? 0);
+    // 内容指纹不符：读档会被 sanitizeSequence 洗技能，先在这里说清楚
+    const currentHash = getCurrentHash?.() ?? null;
+    const foreign =
+      currentHash !== null &&
+      typeof slot.contentHash === 'string' &&
+      slot.contentHash !== currentHash;
     return `
       <li class="slot-card">
         <div class="slot-main">
@@ -77,7 +91,15 @@ export function createSavesScreen({ onLoad, onSave, onDelete, onBack, listSlots,
             <div><dt>胜场</dt><dd>${slot.battlesWon}</dd></div>
             <div><dt>装备</dt><dd>${slot.equippedCount} / 8</dd></div>
           </dl>
-          <p class="slot-seed">种子 <code>${escapeHtml(slot.seed)}</code></p>
+          <p class="slot-seed">
+            种子 <code>${escapeHtml(slot.seed)}</code>
+            ${
+              slot.contentHash
+                ? ` · 内容 <code>${escapeHtml(String(slot.contentHash))}</code>`
+                : ''
+            }
+            ${foreign ? '<span class="slot-tag is-warn">与当前内容集不符</span>' : ''}
+          </p>
         </div>
         <div class="slot-actions">
           <button type="button" data-load="${slot.slotId}" class="btn-primary">读取</button>

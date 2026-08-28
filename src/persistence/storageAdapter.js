@@ -20,10 +20,20 @@ let cached = null;
  * 探测并缓存可用适配器：IndexedDB → LocalStorage → Memory。
  * 降级时返回 degraded 标记，UI 应提示"存档仅保留在本浏览器，可能被清理"。
  */
-export async function pickAdapter({ force = false } = {}) {
-  if (cached !== null && !force) return cached;
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.force] 忽略缓存重探
+ * @param {boolean} [options.modded] 启用了运行时包 ⇒ 用独立命名空间（另一个库/前缀）
+ */
+export async function pickAdapter({ force = false, modded = false } = {}) {
+  if (cached !== null && !force && cached.modded === modded) return cached;
 
-  const candidates = [new IndexedDbAdapter(), new LocalStorageAdapter(), new MemoryAdapter()];
+  const namespace = modded ? 'modded' : 'vanilla';
+  const candidates = [
+    new IndexedDbAdapter(namespace),
+    new LocalStorageAdapter(namespace),
+    new MemoryAdapter(namespace),
+  ];
   /** 每一档的探测结果。降级时必须能说出"是被什么挡住的"。 */
   const attempts = [];
 
@@ -42,15 +52,16 @@ export async function pickAdapter({ force = false } = {}) {
       ok = false;
     }
     if (ok) {
-      cached = { adapter, degraded: adapter.kind !== 'indexeddb', attempts };
+      cached = { adapter, degraded: adapter.kind !== 'indexeddb', attempts, modded };
       return cached;
     }
     attempts.push({ kind: adapter.kind, reason: adapter.lastError ?? '探测返回不可用' });
   }
 
   cached = {
-    adapter: new MemoryAdapter(),
+    adapter: new MemoryAdapter(namespace),
     degraded: true,
+    modded,
     attempts: [...attempts, { kind: 'memory', reason: '全部后端不可用，仅存内存（刷新即丢）' }],
   };
   return cached;

@@ -122,7 +122,14 @@ export function createHistoryScreen({ listHistory, getSnapshot, onOpenCodex, onB
           <div><dt>战斗耗时</dt><dd>${((entry.virtualTimeMs ?? 0) / 1000).toFixed(2)}s</dd></div>
         </dl>
         <p class="history-seq">${sequence} 个 GCD · ${ogcd} 个 oGCD</p>
-        <p class="history-seed">种子 <code>${escapeHtml(String(entry.seed ?? '—'))}</code></p>
+        <p class="history-seed">
+          种子 <code>${escapeHtml(String(entry.seed ?? '—'))}</code>
+          ${
+            entry.contentHash === undefined || entry.contentHash === null
+              ? ''
+              : ` · 内容 <code>${escapeHtml(String(entry.contentHash))}</code>`
+          }
+        </p>
       </li>`;
   }
 

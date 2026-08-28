@@ -102,12 +102,14 @@ export function createDialog(container) {
   /**
    * 结算面板（规格 11.1）。战斗失败或通关后弹出。
    * 快照里所有文本都经 escapeHtml —— 装备名与种子来自模组，不可信任。
+ * 内容指纹要显示出来：晒成绩的人必须能说清"这是哪个内容池打出来的"。
    *
    * 按钮走显式回调而不是 onClose：通关面板有两个出路（继续无尽 / 结束这局），
    * 而 onClose 在"任何方式关闭"时都会触发，会把玩家没选的那条也执行一遍。
    */
   function openSummary(snapshot, {
     outcome,
+    contentHash = null,
     primaryLabel = '开始新的轮回',
     onPrimary = null,
     secondaryLabel = null,
@@ -139,6 +141,11 @@ export function createDialog(container) {
         <div><dt>获得碎片</dt><dd>${fmt(m.shardsEarned)}</dd></div>
         <div><dt>拾获装备</dt><dd>${fmt(m.gearFound)} 件</dd></div>
         <div><dt>使用种子</dt><dd><code>${escapeHtml(String(snapshot.seed))}</code></dd></div>
+        ${
+          contentHash === null
+            ? ''
+            : `<div><dt>内容指纹</dt><dd><code>${escapeHtml(String(contentHash))}</code></dd></div>`
+        }
         <div><dt>胜负</dt><dd>${won ? '通关' : '阵亡'}</dd></div>
       </dl>
       <h3>技能序列摘要</h3>

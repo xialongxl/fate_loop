@@ -5,25 +5,39 @@
  * 原生 API 包一层 Promise 即可，不值得为此加运行时依赖。
  */
 
-const DB_NAME = 'fate-loop';
+/**
+ * 库名按命名空间分开：装了运行时包（modded）的运行写另一个库，
+ * 这样最坏情况从"毁掉你所有存档"降到"毁掉一个沙箱库"。
+ * 见 docs/模组沙箱与包格式设计.md §7.2。
+ */
+const DB_NAMES = Object.freeze({ vanilla: 'fate-loop', modded: 'fate-loop-modded' });
 /** 期望的最低版本。只用于自愈时算下一个版本号，绝不拿它当 open 的参数（见 #openDb）。 */
 const DB_MIN_VERSION = 1;
 const STORE_NAME = 'kv';
 
 export class IndexedDbAdapter {
   kind = 'indexeddb';
+  #db;
+  constructor(namespace = 'vanilla') {
+    this.namespace = namespace === 'modded' ? 'modded' : 'vanilla';
+    this.#db = DB_NAMES[this.namespace];
+  }
   /** 最近一次探测失败的原因。降级提示要说清"为什么"，光说"降级"没法排查。 */
   lastError = null;
   #dbPromise = null;
 
-  /** 打开指定版本；version 为 undefined 时打开浏览器里的当前版本。 */
+  /**
+   * 打开指定版本；version 为 undefined 时打开浏览器里的当前版本。
+   * @param {number|undefined} version 绝不传"比现存版本低"的号，见 #openDb
+   */
   #rawOpen(version) {
     return new Promise((resolve, reject) => {
       if (typeof indexedDB === 'undefined' || indexedDB === null) {
         reject(new Error('IndexedDB 不可用'));
         return;
       }
-      const request = version === undefined ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version);
+      const request =
+        version === undefined ? indexedDB.open(this.#db) : indexedDB.open(this.#db, version);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains(STORE_NAME)) {

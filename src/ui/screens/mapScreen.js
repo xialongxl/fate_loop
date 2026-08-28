@@ -17,6 +17,7 @@ export function createMapScreen({
   onNodeAction,
   onSeedChange,
   getLogLimit = null,
+  getContentFingerprint = null,
 }) {
   const element = document.createElement('section');
   element.className = 'screen-map';
@@ -57,9 +58,13 @@ export function createMapScreen({
       <input id="seed-input" type="text" data-slot="seed-input" inputmode="numeric" />
       <button type="button" data-act="apply-seed" class="btn-ghost">重开此种子</button>
     </div>
-    <p class="panel-note">同种子必得同地图、同遭遇、同战斗结果。可填数字或任意词语。</p>
+    <p class="panel-note">
+      同种子必得同地图、同遭遇、同战斗结果 —— 但前提是**内容池相同**。可填数字或任意词语。
+      <span class="seed-fingerprint" data-slot="fingerprint"></span>
+    </p>
   `;
   const seedInput = seedSlot.querySelector('[data-slot="seed-input"]');
+  const fingerprintSlot = seedSlot.querySelector('[data-slot="fingerprint"]');
 
   logSlot.innerHTML = `
     <h3 class="panel-title">近期动态</h3>
@@ -195,6 +200,10 @@ export function createMapScreen({
     if (!viewTouched && view.zoom === 1 && view.offsetX === 0 && view.offsetY === 0) fitView();
     else renderer.applyView(view);
     if (document.activeElement !== seedInput) seedInput.value = String(snapshot.seed);
+    if (fingerprintSlot !== null && getContentFingerprint !== null) {
+      const fp = getContentFingerprint();
+      fingerprintSlot.textContent = fp === null || fp === undefined ? '' : `本局内容指纹 ${fp.hash}`;
+    }
     renderNodePanel(snapshot);
     renderLog(snapshot);
   }

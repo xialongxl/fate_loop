@@ -129,6 +129,9 @@ export function summarizeSave(record) {
   return {
     incompatible: false,
     savedAt: record.savedAt ?? null,
+    // 存档时那一局的内容指纹（记录级字段，不在 run data 里）
+    contentHash: record.contentHash ?? null,
+    contentMods: record.contentMods ?? [],
     seed: save.seed,
     floorNumber: save.floorNumber,
     exp: save.exp ?? 0,

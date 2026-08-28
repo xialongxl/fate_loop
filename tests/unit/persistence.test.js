@@ -534,6 +534,57 @@ describe('存档往返：restoreRun', () => {
   });
 });
 
+describe('命名空间隔离与存档凭据（S1）', () => {
+  it('存档记录带 contentHash，loadSlot 把它原样带出来', async () => {
+    const service = new SaveService();
+    await service.init();
+    service.provideFingerprint(() => ({ hash: 'cafe1234', mods: [{ id: 'm', version: '1' }], packs: [] }));
+
+    const { store, flow } = await createHarness({ seed: 12 });
+    flow.enterFloor(1);
+    service.saveToSlot('slot1', store.unsafeGetState());
+    await service.flush();
+
+    const loaded = await service.loadSlot('slot1');
+    expect(loaded.contentHash).toBe('cafe1234');
+    expect(loaded.contentMods).toEqual([{ id: 'm', version: '1' }]);
+    const [first] = await service.listSlots();
+    expect(first.contentHash).toBe('cafe1234');
+  });
+
+  it('modded 与 vanilla 是两个互不可见的库', async () => {
+    const vanilla = new SaveService();
+    await vanilla.init({ modded: false });
+    const { store, flow } = await createHarness({ seed: 24 });
+    flow.enterFloor(1);
+    vanilla.saveToSlot('slot1', store.unsafeGetState());
+    await vanilla.flush();
+
+    const modded = new SaveService();
+    await modded.init({ modded: true });
+    expect(modded.modded).toBe(true);
+    expect(await modded.loadSlot('slot1')).toBeNull(); // 看不见 vanilla 的档
+
+    modded.saveToSlot('slot1', store.unsafeGetState());
+    await modded.flush();
+    expect(await modded.loadSlot('slot1')).not.toBeNull();
+    const stillThere = await vanilla.loadSlot('slot1');
+    expect(stillThere.savedAt).not.toBeNull();
+  });
+
+  it('没有注入指纹提供者时，存档照样能写（不因缺凭据而失败）', async () => {
+    const service = new SaveService();
+    await service.init();
+    const { store, flow } = await createHarness({ seed: 36 });
+    flow.enterFloor(1);
+    service.saveToSlot('slot2', store.unsafeGetState());
+    await service.flush();
+    const loaded = await service.loadSlot('slot2');
+    expect(loaded.contentHash).toBeNull();
+    expect(loaded.run.seed).toBe(36);
+  });
+});
+
 describe('降级原因要能被说出来（不能只说"降级"）', () => {
   it('IndexedDB 不可用时，attempts 里带着具体原因', async () => {
     const savedIdb = globalThis.indexedDB;

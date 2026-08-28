@@ -1,0 +1,26 @@
+<!doctype html>
+<!--
+  UI 布局体检的驱动页。不是产品入口（产品入口是 index.html → src/boot.js）。
+  由 tools/ui-audit/run.mjs 用无头浏览器打开：?screen=xxx 决定停在哪个界面。
+  vite build 不会打包它（多页构建只跟 index.html），但 eslint 会扫，
+  所以 tools/** 在 eslint.config.js 里单独给了 DOM 全局。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>ui-audit harness (dev only)</title>
+    <style>
+      /* 体检要量的是产品样式，别让浏览器默认 margin 干扰几何 */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: #0d1117;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/tools/ui-audit/harness.js"></script>
+  </body>
+</html>

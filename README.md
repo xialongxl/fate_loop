@@ -91,6 +91,28 @@ src/
 | `unit/mod-loading.test.js` | 六步法与 normalize、内容守卫（禁止手写派生值） |
 | `unit/audio.test.js`、`unit/contracts.test.js` | 节流器、清单、契约注册与音频无关性 |
 
+## UI 布局体检（CSS 不是闭眼写的）
+
+jsdom 没有布局引擎，CSS 写歪了测试照样全绿。所以仓库里带了一个真浏览器体检：
+
+```bash
+npm run ui:audit                                      # 13 个界面 × 1440x900
+npm run ui:audit -- --views=1440x900,900x900,420x900  # 多档视口矩阵
+npm run ui:audit -- --only=map,battle --shots=.ui-audit
+UI_AUDIT_BROWSER=/路径/msedge.exe npm run ui:audit    # 指定浏览器
+```
+
+它起一个 dev server，用无头 Edge/Chrome 把应用驱动到每个界面（打过仗、有装备、
+开着商店/事件/通关面板），然后量：**横向溢出、零高度可见元素、元素跑出视口、
+文本被裁且没写 ellipsis、面板被遮挡、对比度 < 4.5:1、当前屏几乎是空的**，
+外加屏高占比 / 节点数 / 雾点数 / 可达节点 / 实体卡数等指标。有问题就非零退出。
+
+两条设计约束值得记：
+- **每个用例都有前置断言**（"通关面板确实打开了"）。没有它，"其实阵亡在地图上"
+  这种状态会安静地报成 ✓ —— 比没有体检更坏
+- 结果写进 `<script type="application/json">` 由 Node 侧解析，不引入
+  puppeteer/playwright（本项目运行时依赖只有 howler）
+
 ## 加内容（模组）
 
 内容就是放在 `src/mods/<作者>/<模组名>/` 下的 ES 模块：一个 `manifest.js` 声明

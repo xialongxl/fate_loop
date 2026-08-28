@@ -5,3 +5,6 @@ dist/
 Thumbs.db
 .vite/
 coverage/
+
+# UI 体检截图产物
+.ui-audit/

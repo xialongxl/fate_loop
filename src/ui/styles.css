@@ -356,6 +356,8 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+  /* 放大后节点会跑到 viewBox 之外，靠这条裁掉：不写就依赖 UA 默认值 */
+  overflow: hidden;
   cursor: grab;
   touch-action: none;
 }

@@ -165,6 +165,27 @@ export default [
     },
   },
 
+  // UI 体检工具的浏览器侧（tools/ui-audit/harness.js）：跑在真浏览器里，
+  // 需要一整套 DOM 全局。Node 侧的 run.mjs 不被 '**/*.js' 匹配，另配。
+  {
+    files: ['tools/**/*.js'],
+    languageOptions: {
+      ...baseLanguageOptions,
+      globals: {
+        console: 'readonly',
+        document: 'readonly',
+        window: 'readonly',
+        location: 'readonly',
+        URLSearchParams: 'readonly',
+        MouseEvent: 'readonly',
+        innerWidth: 'readonly',
+        innerHeight: 'readonly',
+        getComputedStyle: 'readonly',
+        setTimeout: 'readonly',
+      },
+    },
+  },
+
   // 测试：放宽全部约束（需要构造边界情况）
   {
     files: ['tests/**/*.js'],

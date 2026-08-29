@@ -153,11 +153,38 @@ const baseFlags = [
   `--user-data-dir=${toNativePath(profile)}`,
 ];
 
+/**
+ * 预检：浏览器能不能跑。
+ * Edge 自动升级后出现过"启动即崩、exit=0 且零输出"的情况 —— 那时 13 个组合会
+ * 全部报"没拿到结果"，看起来像 UI 出了 13 个问题。必须先分清是**浏览器坏了**
+ * 还是**页面真的有问题**，否则这个工具会指错方向。
+ */
+async function browserPreflight() {
+  const { stdout, stderr } = await runBrowser(browserPath, [
+    ...baseFlags,
+    '--window-size=800,600',
+    '--virtual-time-budget=8000',
+    '--dump-dom',
+    'data:text/html,<p>preflight</p>',
+  ]);
+  return { ok: stdout.includes('preflight'), stdout, stderr };
+}
+
 let server = null;
 const results = [];
 let failures = 0;
 
 try {
+  const preflight = await browserPreflight();
+  if (!preflight.ok) {
+    console.error(`浏览器预检失败：${browserPath} 启动后没有任何输出。`);
+    console.error('这通常是 Edge 刚自动升级（Application/ 下出现多个版本目录）或残留进程卡住。');
+    console.error(`先确认它能跑：${browserPath} --version`);
+    console.error('本次不跑矩阵 —— 否则会把"浏览器坏了"误报成"界面有问题"。');
+    console.error('（跳过：' + browserPath + '）');
+    process.exit(3);
+  }
+
   server = startDevServer();
   const port = await server.ready;
   const baseUrl = `http://localhost:${port}/`;

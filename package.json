@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "npm run lint && npm run test && npm run build",
-    "ui:audit": "node tools/ui-audit/run.mjs"
+    "ui:audit": "node tools/ui-audit/run.mjs",
+    "mod:poc": "node tools/mod-sandbox-poc.mjs"
   },
   "dependencies": {
     "howler": "2.2.4"
@@ -21,6 +22,7 @@
     "eslint": "9.39.1",
     "fake-indexeddb": "6.0.0",
     "jsdom": "25.0.1",
+    "quickjs-emscripten": "^0.32.0",
     "vite": "7.3.6",
     "vitest": "3.2.7"
   }

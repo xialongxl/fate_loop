@@ -185,6 +185,27 @@ export class SaveService {
     return out;
   }
 
+  /**
+   * 直接写入一条现成的记录（导入用 —— 导入没有"当前状态"可序列化）。
+   * 走同一条写队列，因此与 saveToSlot 一样是同步入队、宏任务落盘。
+   */
+  saveRecord(slotId, record) {
+    // 落盘形状必须与 saveToSlot 一致：run 放在 `data` 键下，
+    // 否则 loadSlot 的 `record.data ?? record` 会拿到外层记录、读不到 schemaVersion
+    const { run, data, ...rest } = record;
+    return this.enqueue(slotKey(slotId), { ...rest, slotId, data: run ?? data });
+  }
+
+  /** 读出若干槽位的完整记录（导出用）。空槽与不兼容槽会被跳过。 */
+  async readRecords(slotIds) {
+    const out = [];
+    for (const slotId of slotIds) {
+      const loaded = await this.loadSlot(slotId);
+      if (loaded !== null) out.push({ slotId, ...loaded });
+    }
+    return out;
+  }
+
   async deleteSlot(slotId) {
     if (this.#adapter === null) await this.init();
     this.#pending.delete(slotKey(slotId));

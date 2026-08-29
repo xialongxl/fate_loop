@@ -21,6 +21,9 @@ export function createSavesScreen({
   listSlots,
   canSave,
   getCurrentHash = null,
+  onExport = null,
+  onExportAll = null,
+  onImportFile = null,
 }) {
   const element = document.createElement('section');
   element.className = 'screen-saves';
@@ -29,6 +32,12 @@ export function createSavesScreen({
       <h2 tabindex="-1">存档管理</h2>
       <button type="button" class="btn-ghost" data-act="back">← 返回</button>
     </header>
+    <div class="transfer-bar">
+      <label class="visually-hidden" for="save-import-file">选择存档文件</label>
+      <input id="save-import-file" type="file" accept="application/json,.json" data-slot="import-file" hidden />
+      <button type="button" class="btn-ghost" data-act="import">导入存档文件…</button>
+      <button type="button" class="btn-ghost" data-act="export-all">导出全部</button>
+    </div>
     <p class="screen-hint">
       自动存档在每层开始与每场战斗结算后写入，不可手动覆盖。
       手动槽需要局内才能保存。种子是复现整局的完整凭据。
@@ -103,6 +112,7 @@ export function createSavesScreen({
         </div>
         <div class="slot-actions">
           <button type="button" data-load="${slot.slotId}" class="btn-primary">读取</button>
+          ${onExport === null ? '' : `<button type="button" data-export="${slot.slotId}" class="btn-ghost">导出</button>`}
           ${saveable ? `<button type="button" data-save="${slot.slotId}" class="btn-ghost">覆盖</button>` : ''}
           <button type="button" data-delete="${slot.slotId}" class="btn-danger">删除</button>
         </div>
@@ -123,10 +133,30 @@ export function createSavesScreen({
     list.innerHTML = slots.map(slotCard).join('');
   }
 
+  const importInput = element.querySelector('[data-slot="import-file"]');
+  importInput?.addEventListener('change', () => {
+    const file = importInput.files?.[0];
+    if (file !== undefined && file !== null) void onImportFile?.(file);
+    importInput.value = '';
+  });
+
   element.addEventListener('click', (event) => {
     const target = event.target;
     if (target.getAttribute?.('data-act') === 'back') {
       onBack();
+      return;
+    }
+    if (target.getAttribute?.('data-act') === 'import') {
+      importInput?.click();
+      return;
+    }
+    if (target.getAttribute?.('data-act') === 'export-all') {
+      void onExportAll?.();
+      return;
+    }
+    const exportId = target.getAttribute?.('data-export');
+    if (exportId !== null && exportId !== undefined) {
+      void onExport?.(exportId);
       return;
     }
     const loadId = target.getAttribute?.('data-load');

@@ -1266,3 +1266,52 @@ describe('自动存档的后悔药', () => {
     expect(q('[data-act="continue-prev"]')).toBeNull();
   });
 });
+
+// ============================================================
+// 存档导出 / 导入（UI 通路）
+// ============================================================
+
+describe('存档导出导入界面', () => {
+  beforeEach(() => {
+    startRun(app);
+    app.router.go(SCREEN.SAVES);
+  });
+
+  it('存档屏有导入与导出全部入口；空槽不给导出按钮', async () => {
+    await tick();
+    expect(q(`${screenEl(SCREEN.SAVES)} [data-act="import"]`)).not.toBeNull();
+    expect(q(`${screenEl(SCREEN.SAVES)} [data-act="export-all"]`)).not.toBeNull();
+    expect(q(`${screenEl(SCREEN.SAVES)} input[type="file"]`)).not.toBeNull();
+    // 这局一步没走 ⇒ 自动档没被覆盖 ⇒ 四个槽都是空的
+    expect(qa(`${screenEl(SCREEN.SAVES)} [data-export]`).length).toBe(0);
+  });
+
+  it('有内容的槽位才给导出；点导出不炸（无下载能力时要给出提示）', async () => {
+    // 下层 = 明确进度 ⇒ 自动档写入
+    const exit = nodeById(app.snapshot(), app.snapshot().exitNodeId);
+    standOn(app, exit);
+    app.flow.descend();
+    app.router.go(SCREEN.SAVES);
+    await tick();
+
+    const buttons = qa(`${screenEl(SCREEN.SAVES)} [data-export]`);
+    expect(buttons.length).toBe(1); // 只有自动槽有内容
+    expect(buttons[0].getAttribute('data-export')).toBe(AUTO_SAVE_SLOT);
+
+    click(buttons[0]);
+    await tick(3);
+    const toast = q('.app-toast');
+    expect(toast.hidden).toBe(false);
+    expect(toast.textContent).toMatch(/已导出|不支持下载/);
+  });
+
+  it('导出全部在没有任何存档时给出提示', async () => {
+    await tick();
+    const fresh = await mount({ clearStorage: false });
+    fresh.router.go(SCREEN.SAVES);
+    await tick();
+    click(must(`${screenEl(SCREEN.SAVES)} [data-act="export-all"]`));
+    await tick(3);
+    expect(q('.app-toast').textContent).toMatch(/导出|没有任何存档/);
+  });
+});

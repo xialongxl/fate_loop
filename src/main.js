@@ -33,6 +33,13 @@ import { GameFlow } from './core/game.js';
 import { SKILL_FAMILY_LABELS } from './core/constants.js';
 import { describeGear, rarityOf } from './core/equipment.js';
 import { SaveService } from './persistence/saveService.js';
+import { SAVE_SLOT_IDS, slotLabel } from './persistence/schema.js';
+import {
+  buildExport,
+  buildMultiExport,
+  parseImport,
+  summarizeImportedSlot,
+} from './persistence/saveTransfer.js';
 import { computeContentFingerprint, fingerprintMatches } from './persistence/contentFingerprint.js';
 import { defaultSettings } from './persistence/schema.js';
 import { HowlerAudio } from './ui/audio/howlerAudio.js';
@@ -426,6 +433,9 @@ export async function createApp({
       listSlots: () => saveService.listSlots(),
       canSave: canWriteSave,
       getCurrentHash: () => fingerprint.hash,
+      onExport: safe((slotId) => void exportSlot(slotId)),
+      onExportAll: safe(() => void exportAll()),
+      onImportFile: safe((file) => void importFile(file)),
       onLoad: async (slotId) => {
         const loadedSlot = await saveService.loadSlot(slotId);
         if (loadedSlot === null) {
@@ -885,6 +895,127 @@ export async function createApp({
   }
 
   /** 从"上一局自动档"备份读回（读成功后删掉备份，避免一个档被反复回退）。 */
+  // ---- 存档导出 / 导入（单个 JSON 文件） ----
+
+  function downloadJson(filename, text) {
+    if (typeof URL?.createObjectURL !== 'function') return false; // 无 DOM 环境（测试）
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return true;
+  }
+
+  async function exportSlot(slotId) {
+    const record = await saveService.loadSlot(slotId);
+    if (record === null) {
+      notify('这个槽位是空的', 'warn');
+      return;
+    }
+    const text = JSON.stringify(
+      buildExport({ slotId, label: slotLabel(slotId), record }),
+      null,
+      2,
+    );
+    const name = `fate-loop-${slotId}-${fingerprint.hash}.json`;
+    if (downloadJson(name, text)) notify(`已导出 ${name}`, 'info');
+    else notify('当前环境不支持下载，请改用截图/记录种子', 'warn');
+  }
+
+  async function exportAll() {
+    const records = await saveService.readRecords(SAVE_SLOT_IDS);
+    if (records.length === 0) {
+      notify('没有任何存档可以导出', 'warn');
+      return;
+    }
+    const text = JSON.stringify(
+      buildMultiExport(
+        records.map((record) => ({
+          slotId: record.slotId,
+          label: slotLabel(record.slotId),
+          record,
+        })),
+      ),
+      null,
+      2,
+    );
+    const name = `fate-loop-all-${fingerprint.hash}.json`;
+    if (downloadJson(name, text)) notify(`已导出 ${records.length} 个槽位`, 'info');
+  }
+
+  /** 导入：解析 → 校验 → 列明要写进哪些槽位 → 一次确认 → 落盘并读回第一个。 */
+  async function importFile(file) {
+    let text = '';
+    try {
+      text = await file.text();
+    } catch (error) {
+      notify(`读取文件失败：${String(error?.message ?? error)}`, 'warn');
+      return;
+    }
+    const parsed = parseImport(text);
+    if (!parsed.ok) {
+      notify(`导入失败：${parsed.reason}`, 'warn');
+      audio.play('ui.deny', {});
+      return;
+    }
+    const rows = parsed.slots.map((slot) => {
+      const info = summarizeImportedSlot(slot);
+      const foreign =
+        info.contentHash !== null && info.contentHash !== undefined && info.contentHash !== fingerprint.hash;
+      return `
+        <li class="shop-item">
+          <span class="shop-item-info">
+            <span class="shop-item-name">${escapeHtml(slotLabel(info.slotId))}</span>
+            <span class="shop-item-desc">
+              种子 ${escapeHtml(String(info.seed))} · 第 ${info.floorNumber} 层 · Lv.${info.level} ·
+              碎片 ${formatNumber(info.fateShards)}
+              ${foreign ? ` · <span class="tag is-lock">内容指纹 ${escapeHtml(String(info.contentHash))} 与当前不符</span>` : ''}
+            </span>
+          </span>
+        </li>`;
+    });
+    // 用自定义面板而不是 confirm：导入前必须让玩家看清"要写哪些槽位、
+    // 每个槽位是什么内容、内容指纹对不对得上"—— 覆盖是不可撤销的
+    const chosen = await new Promise((resolve) => {
+      const box = dialog.open(
+        `
+        <h2 tabindex="-1">导入存档</h2>
+        <p class="dialog-text">准备导入 ${parsed.slots.length} 个槽位。<strong>同名槽位会被覆盖</strong>，此操作不可撤销。</p>
+        <ul class="shop-list">${rows.join('')}</ul>
+        <div class="dialog-actions">
+          <button type="button" data-act="import-cancel" class="btn-ghost">取消</button>
+          <button type="button" data-act="import-ok" class="btn-primary" data-autofocus>导入</button>
+        </div>
+      `,
+        { closeOnBackdrop: false },
+      );
+      box.addEventListener('click', (event) => {
+        const act = event.target.getAttribute?.('data-act');
+        if (act === 'import-ok') {
+          dialog.close();
+          resolve(true);
+        } else if (act === 'import-cancel') {
+          dialog.close();
+          resolve(false);
+        }
+      });
+    });
+    if (!chosen) return;
+    for (const slot of parsed.slots) {
+      saveService.saveRecord(slot.slotId, {
+        savedAt: slot.savedAt ?? Date.now(),
+        contentHash: slot.contentHash ?? null,
+        contentMods: slot.contentMods ?? [],
+        run: slot.run,
+      });
+    }
+    await saveService.flush();
+    notify(`已导入 ${parsed.slots.length} 个槽位`, 'info');
+    screens[SCREEN.SAVES].refresh?.();
+  }
+
   async function continuePrevRun() {
     const prev = await saveService.loadPrevAuto();
     if (prev === null) {

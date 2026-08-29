@@ -95,8 +95,13 @@ export class GameFlow {
     return level;
   }
 
-  /** 生成当前层地图并把玩家放到起点。 */
-  enterFloor(floorNumber = null) {
+  /**
+   * 生成当前层地图并把玩家放到起点。
+   * @param {number|null} [floorNumber] 目标层，省略则沿用当前层
+   * @param {{save?: boolean}} [options] `save:false` 用于"恢复流程中间的那次调用"——
+   *   默认会写自动档，而恢复中途玩家数据还没填回去，写下去就是一份空局。
+   */
+  enterFloor(floorNumber = null, { save = true } = {}) {
     const state = this.#store.unsafeGetState();
     const floor = floorNumber ?? state.floorNumber;
     const generator = this.#pool.mapGenerators.get('official.grid');
@@ -129,7 +134,7 @@ export class GameFlow {
       pushLog(draft, `进入第 ${floor} 层（${result.gridWidth}×${result.gridHeight}）`);
     });
 
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    if (save) this.#saveService?.saveRun(this.#store.unsafeGetState());
     return result;
   }
 
@@ -589,7 +594,9 @@ export class GameFlow {
       draft.seed = run.seed;
     });
 
-    this.enterFloor(run.floorNumber);
+    // 关键：这次 enterFloor 不能写档。它会把自动槽覆盖成"玩家数据还没恢复"的半成品
+    // —— 磁盘毁了而内存是对的，读档后只要没再做别的操作就永久丢档（实测过）。
+    this.enterFloor(run.floorNumber, { save: false });
 
     this.#store.update((draft) => {
       draft.fateShards = run.fateShards ?? 0;
@@ -644,6 +651,9 @@ export class GameFlow {
       // 放在日志复位之后，否则这条通知会被上面那次 log = [] 抹掉。
       this.#sanitizeDraft(draft, []);
     });
+
+    // 恢复完成后立刻写一次自动档：让磁盘与内存对齐，不再依赖"玩家之后做过点什么"
+    this.#saveService?.saveRun(this.#store.unsafeGetState());
 
     // 商店商品列表是由种子派生的，重新 open 时会自动重建；
     // 上面只恢复了 purchasedIds，offers 为空数组则会在 getShopOffers 中重建。

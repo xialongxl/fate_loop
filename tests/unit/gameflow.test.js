@@ -1399,3 +1399,64 @@ describe('通关与无尽', () => {
     expect(monster.hp).toBeGreaterThan(50);
   });
 });
+
+describe('读档不得毁掉自动存档', () => {
+  /** 攒一点真实进度：打赢两场。 */
+  async function runWithProgress(h) {
+    h.flow.enterFloor(1);
+    const nodes = h.st().mapNodes.filter((n) => n.type === NODE_TYPE.COMBAT).slice(0, 3);
+    for (const node of nodes) {
+      h.goto(node);
+      h.flow.startBattle();
+      settle(h);
+      const result = h.flow.finishBattle();
+      if (!result.won) break;
+    }
+    return h.st();
+  }
+
+  it('restoreRun 中途不写档，结束时写回的必须等于读出来的', async () => {
+    const { SaveService } = await import('../../src/persistence/saveService.js');
+    const saves = new SaveService();
+    await saves.init();
+
+    const source = await boot({ saveService: saves });
+    await runWithProgress(source);
+    await saves.flush();
+
+    const before = await saves.loadSlot('auto');
+    expect(before).not.toBeNull();
+    expect(before.run.exp).toBeGreaterThan(0);
+    expect(before.run.clearedNodeIds.length).toBeGreaterThan(0);
+
+    // 新会话读这份档，然后**什么都不做**（旧实现里这一步会把自动档覆盖成空局）
+    const reader = await boot({ seed: 4242, saveService: saves });
+    reader.flow.restoreRun(before.run);
+    await saves.flush();
+
+    const after = await saves.loadSlot('auto');
+    expect(after.run.exp).toBe(before.run.exp);
+    expect(after.run.fateShards).toBe(before.run.fateShards);
+    expect(after.run.clearedNodeIds).toEqual(before.run.clearedNodeIds);
+    expect(after.run.currentNodeId).toBe(before.run.currentNodeId);
+    expect(after.run.equipment).toEqual(before.run.equipment);
+  });
+
+  it('enterFloor 默认仍写自动档（下层/开局照常存档）', async () => {
+    const { SaveService } = await import('../../src/persistence/saveService.js');
+    const saves = new SaveService();
+    await saves.init();
+    const h = await boot({ saveService: saves });
+    await saves.flush();
+    const first = await saves.loadSlot('auto');
+    expect(first.run.floorNumber).toBe(1);
+
+    h.flow.enterFloor(2);
+    await saves.flush();
+    expect((await saves.loadSlot('auto')).run.floorNumber).toBe(2);
+
+    h.flow.enterFloor(3, { save: false });
+    await saves.flush();
+    expect((await saves.loadSlot('auto')).run.floorNumber).toBe(2); // 显式不写就不写
+  });
+});

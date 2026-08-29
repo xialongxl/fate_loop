@@ -31,6 +31,10 @@ import {
 import { AUTO_SAVE_SLOT } from '../core/constants.js';
 import { migrateLocalToIndexedDb, pickAdapter } from './storageAdapter.js';
 
+/** "上一局自动档"用的槽位与键（不在 SAVE_SLOT_IDS 里，所以不占存档界面的格子）。 */
+const PREV_SLOT = 'autoPrev';
+const PREV_KEY = slotKey(PREV_SLOT);
+
 export class SaveService {
   #adapter = null;
   #degraded = false;
@@ -193,6 +197,41 @@ export class SaveService {
   }
 
   /**
+   * 把当前自动槽备份到"上一局"槽。
+   *
+   * 为什么需要：GameFlow 已经不会用"没有进度的新局"覆盖自动档了，但玩家一旦
+   * 在新局打出进度，上一局的自动档就被覆盖 —— 那一局就此找不回来。开新局的
+   * 那一刻先存一份，主菜单就能给出「回上一局」。
+   */
+  async backupAutoSave() {
+    if (this.#adapter === null) await this.init();
+    const record = this.#pending.get(slotKey(AUTO_SAVE_SLOT)) ?? (await this.#adapter.get(slotKey(AUTO_SAVE_SLOT)));
+    if (record === null || record === undefined) return { ok: false, reason: 'noAutoSave' };
+    await this.#adapter.set(PREV_KEY, { ...record, slotId: PREV_SLOT, backedUpAt: record.savedAt ?? null });
+    this.#pending.delete(PREV_KEY);
+    return { ok: true };
+  }
+
+  /** 读"上一局"备份。没有则 null。 */
+  async loadPrevAuto() {
+    if (this.#adapter === null) await this.init();
+    const record = await this.#adapter.get(PREV_KEY);
+    if (record === null || record === undefined) return null;
+    return {
+      savedAt: record.savedAt ?? null,
+      contentHash: record.contentHash ?? null,
+      contentMods: record.contentMods ?? [],
+      run: deserializeRun(record.data ?? record),
+    };
+  }
+
+  async deletePrevAuto() {
+    if (this.#adapter === null) await this.init();
+    this.#pending.delete(PREV_KEY);
+    await this.#adapter.delete(PREV_KEY);
+  }
+
+  /**
    * 清空全部本地数据：4 个槽位 + 历史战绩 + 设置。
    * 设置界面「清空全部数据」的后端。同时清空待写队列 —— 否则 flush 会把
    * 刚删掉的快照又写回去，玩家看到的是“删不干净”的存档。
@@ -205,6 +244,7 @@ export class SaveService {
       await this.#adapter.delete(slotKey(slotId));
     }
     await this.#adapter.delete(HISTORY_KEY);
+    await this.#adapter.delete(PREV_KEY);
     await this.#adapter.delete(SETTINGS_KEY);
     await this.#adapter.delete(LEGACY_SAVE_KEY);
     return { ok: true };

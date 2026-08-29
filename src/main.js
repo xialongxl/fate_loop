@@ -358,6 +358,17 @@ export async function createApp({
   const screens = {
     [SCREEN.MAIN_MENU]: createMainMenuScreen({
       onContinue: () => void continueRun(),
+      onContinuePrev: () => void continuePrevRun(),
+      getPrevSlot: async () => {
+        const prev = await saveService.loadPrevAuto();
+        if (prev === null) return null;
+        return {
+          empty: false,
+          floorNumber: prev.run?.floorNumber,
+          exp: prev.run?.exp,
+          savedAt: prev.savedAt,
+        };
+      },
       onNewGame: () => openNewGameDialog(),
       onOpen: (id) => router.go(id, { push: true }),
       getAutoSlot: async () => {
@@ -843,6 +854,8 @@ export async function createApp({
     stopLoop();
     dialog.close();
     speed = SPEED_MODES.PAUSED;
+    // 后悔药：新局一旦产生进度就会顶掉自动档，所以此刻先备份一份
+    void saveService.backupAutoSave();
     store.replace(freshState(nextSeed));
     latest = store.getSnapshot();
     flow.enterFloor(1);
@@ -869,6 +882,19 @@ export async function createApp({
     }
     if (!(await confirmContentMismatch(loadedSlot))) return;
     restoreRun(loadedSlot.run);
+  }
+
+  /** 从"上一局自动档"备份读回（读成功后删掉备份，避免一个档被反复回退）。 */
+  async function continuePrevRun() {
+    const prev = await saveService.loadPrevAuto();
+    if (prev === null) {
+      notify('没有可回退的上一局存档', 'warn');
+      return;
+    }
+    if (!(await confirmContentMismatch(prev))) return;
+    restoreRun(prev.run);
+    await saveService.deletePrevAuto();
+    notify('已回退到上一局的自动存档', 'info');
   }
 
   /**

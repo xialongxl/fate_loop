@@ -54,6 +54,40 @@ export class GameFlow {
   }
 
   /**
+   * 这一局是否已经产生"值得存"的进度。
+   *
+   * 为什么要有这个门：主菜单误点一次「新的轮回」就会把自动槽覆盖成空局，
+   * 而自动槽正是「继续游戏」唯一的入口。用状态本身推导（而不是一个布尔标记），
+   * 是因为标记会和 store.replace / restoreRun 的时序脱节，推导不会。
+   *
+   * 注意"只在起点附近走来走去"不算进度：那部分丢了不心疼，误点开局毁档很疼。
+   */
+  #hasProgress(state) {
+    const m = state.metadata;
+    return (
+      state.floorNumber > 1 ||
+      state.fateShards > 0 ||
+      (m.battlesWon ?? 0) > 0 ||
+      (m.expEarned ?? 0) > 0 ||
+      (m.shardsEarned ?? 0) > 0 ||
+      (m.gearFound ?? 0) > 0 ||
+      (m.floorsCleared ?? 0) > 0 ||
+      (state.player.exp ?? 0) > 0 ||
+      (state.player.inventory?.length ?? 0) > 0 ||
+      Object.values(state.player.equipment ?? {}).some((g) => g !== null && g !== undefined) ||
+      state.clearedNodeIds.size > 0 ||
+      state.shopStates.size > 0
+    );
+  }
+
+  /** 写自动槽；没有值得存的进度时什么都不做（见 #hasProgress）。 */
+  #autoSave() {
+    if (this.#saveService === null) return;
+    if (!this.#hasProgress(this.#store.unsafeGetState())) return;
+    this.#saveService.saveRun(this.#store.unsafeGetState());
+  }
+
+  /**
    * 剔除序列里的未解锁技能。P1-2 的运行时那道防御。
    *
    * 为什么要：序列屏已经会拦，但存档可能来自旧版本、可能被手改、也可能
@@ -134,7 +168,7 @@ export class GameFlow {
       pushLog(draft, `进入第 ${floor} 层（${result.gridWidth}×${result.gridHeight}）`);
     });
 
-    if (save) this.#saveService?.saveRun(this.#store.unsafeGetState());
+    if (save) this.#autoSave();
     return result;
   }
 
@@ -294,7 +328,7 @@ export class GameFlow {
 
     if (levelAfter > levelBefore) this.#audio?.play('ui.confirm', {});
 
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { settled: true, won: true, shards, exp, levelBefore, levelAfter, loot: kept };
   }
 
@@ -320,7 +354,7 @@ export class GameFlow {
     });
 
     this.#audio?.play('map.rest', {});
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { ok: true, healed };
   }
 
@@ -410,7 +444,7 @@ export class GameFlow {
     });
 
     this.#audio?.play('ui.purchase', {});
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { ok: true };
   }
 
@@ -446,7 +480,7 @@ export class GameFlow {
       pushLog(draft, `事件「${event.name}」：${choice.label}`);
     });
 
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { ok: true };
   }
 
@@ -515,7 +549,7 @@ export class GameFlow {
       pushLog(draft, '你选择再走一轮 —— 从这里开始没有尽头');
     });
 
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { ok: true, floorNumber: state.floorNumber };
   }
 
@@ -681,7 +715,7 @@ export class GameFlow {
     });
 
     this.#audio?.play('ui.confirm', {});
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { ok: true, slot: gear.slot };
   }
 
@@ -700,7 +734,7 @@ export class GameFlow {
       recalcPlayer(draft.player);
     });
 
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { ok: true };
   }
 
@@ -718,7 +752,7 @@ export class GameFlow {
       pushLog(draft, `分解${gear.name}，回收 ${gained} 枚碎片`);
     });
 
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { ok: true, gained };
   }
 
@@ -743,7 +777,7 @@ export class GameFlow {
     });
 
     this.#audio?.play('ui.purchase', {});
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return result;
   }
 
@@ -776,7 +810,7 @@ export class GameFlow {
     });
 
     this.#audio?.play('ui.purchase', {});
-    this.#saveService?.saveRun(this.#store.unsafeGetState());
+    this.#autoSave();
     return { ok: true, price };
   }
 }

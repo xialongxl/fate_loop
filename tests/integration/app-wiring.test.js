@@ -1122,6 +1122,9 @@ function hashOverrideSaves(hash) {
       loadHistory: () => real.loadHistory(),
       clearRun: () => real.clearRun(),
       clearAll: () => real.clearAll(),
+      backupAutoSave: () => real.backupAutoSave(),
+      loadPrevAuto: () => real.loadPrevAuto(),
+      deletePrevAuto: () => real.deletePrevAuto(),
       flush: () => real.flush(),
       loadSlot: async (id) => patch(await real.loadSlot(id)),
     },
@@ -1194,5 +1197,72 @@ describe('内容指纹', () => {
     expect(qa(`${screenEl(SCREEN.SAVES)} .slot-tag.is-warn`).length).toBeGreaterThan(0);
     // 自动槽才有内容指纹（saveRun 写的是 auto），所以查所有卡片而不是第一张
     expect(qa(`${screenEl(SCREEN.SAVES)} .slot-card`).map((c) => c.textContent).join(' ')).toContain('ffff0000');
+  });
+});
+
+// ============================================================
+// 误点「新的轮回」不得毁掉自动存档
+// ============================================================
+
+describe('自动存档的后悔药', () => {
+  /** 打一局有进度的：赢两场再下层。 */
+  async function buildRun(h) {
+    h.startNewRun(SEED);
+    for (const node of h.snapshot().mapNodes.filter((n) => n.type === NODE_TYPE.COMBAT).slice(0, 2)) {
+      standOn(h, node);
+      h.beginBattle();
+      h.setSpeed(SPEED_MODES.MAX);
+      if (h.snapshot().status === GAME_STATUS.FINISHED) break;
+    }
+    await tick(2);
+    return h.snapshot().player.exp;
+  }
+
+  it('开新局但一步没走：自动档仍是上一局，「继续游戏」能把它读回来', async () => {
+    const exp = await buildRun(app);
+    expect(exp).toBeGreaterThan(0);
+
+    app.gotoMenu();
+    app.startNewRun(SEED + 7); // 误点一次「新的轮回」
+    await tick(2);
+    app.gotoMenu();
+    await tick();
+
+    const continueBtn = must('[data-act="continue"]');
+    expect(continueBtn.disabled).toBe(false);
+    expect(continueBtn.textContent).toContain('第 1 层');
+
+    click(continueBtn);
+    await tick();
+    expect(app.snapshot().player.exp).toBe(exp); // 读回的是原来那一局
+  });
+
+  it('新局真打出进度后，主菜单给出「回上一局」并能读回旧局', async () => {
+    const oldExp = await buildRun(app);
+
+    app.gotoMenu();
+    app.startNewRun(SEED + 11);
+    await tick(2);
+    // 新局下层 = 明确进度 ⇒ 自动档被覆盖，此时只剩备份
+    const exit = nodeById(app.snapshot(), app.snapshot().exitNodeId);
+    standOn(app, exit);
+    app.flow.descend();
+    await tick(2);
+
+    app.gotoMenu();
+    await tick();
+    const prevBtn = q('[data-act="continue-prev"]');
+    expect(prevBtn).not.toBeNull();
+    expect(prevBtn.textContent).toContain('回上一局自动档');
+
+    click(prevBtn);
+    await tick();
+    expect(app.snapshot().player.exp).toBe(oldExp);
+    expect(visibleScreen()).toBe(SCREEN.MAP);
+
+    // 备份用掉一次就消失，避免反复回退
+    app.gotoMenu();
+    await tick();
+    expect(q('[data-act="continue-prev"]')).toBeNull();
   });
 });

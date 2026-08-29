@@ -675,3 +675,51 @@ describe('IndexedDB 版本自愈不能反过来锁死自己', () => {
     resetAdapterCache();
   });
 });
+
+describe('上一局自动档备份（误点开局的后悔药）', () => {
+  it('backupAutoSave 把自动档复制走，原档不动', async () => {
+    const service = new SaveService();
+    await service.init();
+    const { store, flow } = await createHarness({ seed: 88 });
+    flow.enterFloor(1);
+    service.saveRun(store.unsafeGetState());
+    await service.flush();
+
+    expect(await service.backupAutoSave()).toEqual({ ok: true });
+    const prev = await service.loadPrevAuto();
+    expect(prev.run.seed).toBe(88);
+    expect((await service.loadSlot('auto')).run.seed).toBe(88); // 原档还在
+
+    // 备份不出现在存档列表里（它不是第四个格子）
+    const slots = await service.listSlots();
+    expect(slots.map((s) => s.slotId)).not.toContain('autoPrev');
+  });
+
+  it('没有自动档时备份是安全的空操作', async () => {
+    const service = new SaveService();
+    await service.init();
+    expect(await service.backupAutoSave()).toEqual({ ok: false, reason: 'noAutoSave' });
+    expect(await service.loadPrevAuto()).toBeNull();
+  });
+
+  it('读回备份后可删除；clearAll 一并清掉', async () => {
+    const service = new SaveService();
+    await service.init();
+    const { store, flow } = await createHarness({ seed: 121 });
+    flow.enterFloor(1);
+    service.saveRun(store.unsafeGetState());
+    await service.flush();
+    await service.backupAutoSave();
+    expect(await service.loadPrevAuto()).not.toBeNull();
+
+    await service.deletePrevAuto();
+    expect(await service.loadPrevAuto()).toBeNull();
+
+    service.saveRun(store.unsafeGetState());
+    await service.flush();
+    await service.backupAutoSave();
+    await service.clearAll();
+    expect(await service.loadPrevAuto()).toBeNull();
+    expect(await service.loadSlot('auto')).toBeNull();
+  });
+});

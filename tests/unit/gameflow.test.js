@@ -1460,3 +1460,61 @@ describe('读档不得毁掉自动存档', () => {
     expect((await saves.loadSlot('auto')).run.floorNumber).toBe(2); // 显式不写就不写
   });
 });
+
+describe('没有进度的新局不得覆盖自动存档', () => {
+  async function savesWithSavedRun() {
+    const { SaveService } = await import('../../src/persistence/saveService.js');
+    const saves = new SaveService();
+    await saves.init();
+    // 先造一局有进度的档
+    const h = await boot({ saveService: saves });
+    h.flow.enterFloor(1);
+    for (const node of h.st().mapNodes.filter((n) => n.type === NODE_TYPE.COMBAT).slice(0, 2)) {
+      h.goto(node);
+      h.flow.startBattle();
+      settle(h);
+      if (!h.flow.finishBattle().won) break;
+    }
+    await saves.flush();
+    return { saves, h };
+  }
+
+  it('开新局（一步没走）不覆盖自动档', async () => {
+    const { saves } = await savesWithSavedRun();
+    const before = await saves.loadSlot('auto');
+    expect(before.run.exp).toBeGreaterThan(0);
+
+    const fresh = await boot({ seed: 99, saveService: saves });
+    fresh.flow.enterFloor(1); // startNewRun 走的就是这一步
+    await saves.flush();
+
+    const after = await saves.loadSlot('auto');
+    expect(after.run.exp).toBe(before.run.exp);
+    expect(after.run.clearedNodeIds).toEqual(before.run.clearedNodeIds);
+  });
+
+  it('新局一旦打出进度就正常覆盖（自动档不能永远停在旧局）', async () => {
+    const { saves } = await savesWithSavedRun();
+    const fresh = await boot({ seed: 99, saveService: saves });
+    fresh.flow.enterFloor(1);
+    await saves.flush();
+    expect((await saves.loadSlot('auto')).run.floorNumber).toBe(1);
+
+    // 下层 = 明确进度 ⇒ 这次该覆盖
+    fresh.goto(fresh.byId(fresh.st().exitNodeId));
+    fresh.flow.descend();
+    await saves.flush();
+    expect((await saves.loadSlot('auto')).run.floorNumber).toBe(2);
+  });
+
+  it('读档后的自动档写入不受门控影响（读进来的档本身就有进度）', async () => {
+    const { saves } = await savesWithSavedRun();
+    const before = await saves.loadSlot('auto');
+    const reader = await boot({ seed: 7, saveService: saves });
+    reader.flow.restoreRun(before.run);
+    await saves.flush();
+    const after = await saves.loadSlot('auto');
+    expect(after.run.exp).toBe(before.run.exp);
+    expect(after.run.floorNumber).toBe(before.run.floorNumber);
+  });
+});

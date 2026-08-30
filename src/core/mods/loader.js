@@ -136,8 +136,12 @@ export async function loadMods({ registry, modules } = {}) {
   return { pool, loaded };
 }
 
-/** 步骤 6：合并产物，后者覆盖前者。 */
-function mergeIntoPool(pool, result, modId) {
+/**
+ * 步骤 6：合并产物，后者覆盖前者。
+ * 导出给沙箱装配层复用 —— 第三方内容必须过**同一套** normalize 校验，
+ * 不允许出现“官方有校验、模组开后门”的第二条路。
+ */
+export function mergeIntoPool(pool, result, modId) {
   for (const skill of result.skills ?? []) {
     pool.skills.set(skill.id, normalizeSkill(skill, modId));
   }

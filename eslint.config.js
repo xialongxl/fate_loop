@@ -78,6 +78,14 @@ export default [
   // 非确定性来源（Math.random / Date.now）仍然禁止 —— 加载结果必须可复现。
   {
     files: ['src/core/mods/**/*.js'],
+    languageOptions: {
+      globals: {
+        // 沙箱加载器要把包内容喂给 WebCrypto 算 hash（TextEncoder）；
+        // 以及宿主注入的时钟/告警回调可能来自这些宿主对象。
+        TextEncoder: 'readonly',
+        URL: 'readonly',
+      },
+    },
     rules: {
       'no-restricted-syntax': [
         'error',

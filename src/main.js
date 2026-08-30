@@ -41,6 +41,7 @@ import {
   summarizeImportedSlot,
 } from './persistence/saveTransfer.js';
 import { computeContentFingerprint, fingerprintMatches } from './persistence/contentFingerprint.js';
+import { PackService } from './persistence/packs.js';
 import { defaultSettings } from './persistence/schema.js';
 import { HowlerAudio } from './ui/audio/howlerAudio.js';
 import { nullAudio } from './ui/audio/nullAudio.js';
@@ -117,6 +118,7 @@ export async function createApp({
   modules,
   saveService = new SaveService(),
   audio = new HowlerAudio(),
+  packs,
 } = {}) {
   if (root === null || root === undefined) {
     throw new Error('createApp 需要挂载点（#app）');
@@ -136,6 +138,8 @@ export async function createApp({
   const registry = new Registry();
   let engine = null;
   let pool = null;
+  /** 沙箱宿主（只有真装了包才存在）；卸载包时要靠它把 VM 收掉。 */
+  let sandboxHost = null;
 
   registerDefaultContracts({
     store,
@@ -147,19 +151,51 @@ export async function createApp({
 
   const modLoad = await loadMods({ registry, modules });
   pool = modLoad.pool;
+
+  /**
+   * 第三方包（S2）。三件事决定了它必须卡在这里：
+   *  1. **在 saveService.init() 之前** —— 装了包要切到隔离存档命名空间，
+   *     而“装没装”得先知道；
+   *  2. **在算指纹之前** —— 包会往池里塞内容，指纹必须反映它；
+   *  3. **沙箱代码本身是惰性 import 的** —— 没装包的玩家连 227KB 的
+   *     QuickJS wasm 都不该下（主包现在才 28KB）。
+   */
+  const packService = packs === undefined ? new PackService() : packs;
+  const packReport = { ok: [], failed: [], overrides: [], loaded: [], broken: [] };
+  if (packService !== null) {
+    const enabled = await packService.loadEnabled();
+    packReport.broken = enabled.broken;
+    if (enabled.entries.length > 0) {
+      const { installSandboxPacks } = await import('./core/mods/sandbox/index.js');
+      const result = await installSandboxPacks({
+        entries: enabled.entries,
+        pool,
+        clock: () => performance.now(),
+      });
+      packReport.ok = result.ok;
+      packReport.failed = result.failed;
+      packReport.overrides = result.overrides;
+      packReport.loaded = result.loaded;
+      sandboxHost = result.host;
+    }
+  }
+
   engine = new BattleEngine({ store, registry, pool });
 
   await audio.init?.();
   engine.setAudioSinks({ live: audio, silent: nullAudio });
 
-  const storageInfo = await saveService.init();
+  const storageInfo = await saveService.init({ modded: packReport.loaded.length > 0 });
   const flow = new GameFlow({ store, engine, pool, saveService, audio });
 
   /**
    * 内容指纹（S1）。结果 = f(种子, 序列, 内容池)，所以分享种子必须连带分享指纹，
-   * 读档也必须能看出"这份存档来自另一个内容集"。
+   * 读档也必须能看出“这份存档来自另一个内容集”。
    */
-  const fingerprint = computeContentFingerprint(pool, { mods: modLoad.loaded });
+  const fingerprint = computeContentFingerprint(pool, {
+    mods: modLoad.loaded,
+    packs: packReport.loaded,
+  });
   saveService.provideFingerprint(() => fingerprint);
   /** 解锁表由 GameFlow 持有（它要在开战前用它洗序列），屏幕共用同一张。 */
   const unlockTable = flow.unlockTable;
@@ -1143,6 +1179,9 @@ export async function createApp({
     window.removeEventListener('error', onWindowError);
     window.removeEventListener('unhandledrejection', onUnhandledRejection);
     dialog.close();
+    // 沙箱里的 wasm runtime 不收回就是一堆泄漏的 wasm 堆
+    sandboxHost?.dispose();
+    sandboxHost = null;
     shell.root.innerHTML = '';
   }
 
@@ -1150,6 +1189,26 @@ export async function createApp({
   const storage = describeStorage(storageInfo);
   shell.fields.storage.textContent = storage.short;
   shell.fields.storage.title = storage.long;
+
+  /**
+   * 包的状态必须开口说话。静默失败的包会让玩家以为“装了但没效果”，
+   * 而静默成功的包会让他找不到存档去哪了（切了命名空间）。
+   */
+  if (packReport.loaded.length > 0) {
+    notify(
+      `已加载 ${packReport.loaded.length} 个第三方包，存档已切到隔离命名空间`,
+      'info',
+    );
+  }
+  if (packReport.overrides.length > 0) {
+    notify(`第三方包覆盖了 ${packReport.overrides.length} 项官方内容`, 'warn');
+  }
+  for (const failure of packReport.failed.slice(0, 3)) {
+    notify(`包 ${failure.id} 未加载：${failure.reason}`, 'warn');
+  }
+  if (packReport.broken.length > 0) {
+    notify(`有 ${packReport.broken.length} 个包的源文件读不回来，可卸载后重装`, 'warn');
+  }
   // 设置屏页尾显示完整原因：头部那一行放不下"为什么降级"
   screens[SCREEN.SETTINGS].setStorageInfo?.(
     `${storage.long} · 历史战绩保留最近 50 条`,
@@ -1171,6 +1230,13 @@ export async function createApp({
     shell,
     unlockTable,
     fingerprint,
+    saveService,
+    /** 第三方包（S2）：清单、本次装配结果、沙箱宿主与注册表。 */
+    packs: packService,
+    packReport,
+    get sandboxHost() {
+      return sandboxHost;
+    },
     get speed() {
       return speed;
     },

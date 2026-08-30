@@ -280,3 +280,143 @@ describe('包内可变状态 × 确定性', () => {
     expect(punish(second)).not.toBe(punish(firstOnly));
   });
 });
+
+// ============================================================
+// S2b-1：fate.onBattleStart —— 把"单场可复现"拿回来
+// ============================================================
+
+/**
+ * 同一个"有记忆"的包，装两次：一次不挂钩子、一次挂 onBattleStart。
+ * 前者连续两场同种子会**不同**（上面已断言），后者必须**逐字节相同**。
+ */
+function memoryPack({ withHook }) {
+  return createPack({
+    id: 'poc.memory',
+    version: '1.0.0',
+    files: {
+      'main.js': `
+import { begin, skill, onBattleStart, SKILL_TYPE, SKILL_RANGE } from 'fate';
+begin({ id: 'poc.memory', version: '1.0.0' });
+const seen = new Map();
+${withHook ? 'onBattleStart(() => { seen.clear(); });' : ''}
+
+skill({
+  id: 'poc.memory.revenge',
+  name: '追猎',
+  type: SKILL_TYPE.GCD,
+  gcdCost: 2.4,
+  range: SKILL_RANGE.SINGLE,
+  execute: (ctx, self, targets) => {
+    for (const t of targets) {
+      const live = ctx.entity(t.id);
+      const before = seen.get(t.id);
+      if (live !== null && live !== undefined) seen.set(t.id, live.hp);
+      // 记忆判据用"目标比上次见过时更满"：
+      //  · 同一场内 → 只有被治疗过才触发
+      //  · **跨场**时 → 第二场开局敌人是满血、记忆里存的却是上一场的残血 ⇒
+      //    不挂钩子就必然多打一发，这才是能被观测到的泄漏
+      // （上一版用 hp 下降做判据，第二场不会触发，测试其实只在比累计计数）
+      const bonus = before !== undefined && live !== undefined && live.hp > before ? 60 : 0;
+      ctx.damage({ sourceId: self.id, targetId: t.id, amount: 70 + bonus, element: 'shadow' });
+    }
+  },
+});
+`,
+    },
+  });
+}
+
+async function fightWithPack({ withHook, seed }) {
+  const official = await loadOfficialPool();
+  const pool = createContentPool();
+  for (const kind of Object.keys(pool)) pool[kind] = new Map(official[kind]);
+
+  const store = new Store(
+    createInitialState(seed, { gcdSequence: ['poc.memory.revenge'], ogcdSlots: [] }),
+  );
+  const registry = new Registry();
+  let engine = null;
+  registerDefaultContracts({
+    store,
+    getRng: () => engine.getRng(),
+    getBuffTable: () => pool.buffs,
+    getAudioSink: () => null,
+    registry,
+  });
+  // engine 先建：钩子要往它身上挂（与 main.js 的装配顺序一致）
+  engine = new BattleEngine({ store, registry, pool });
+  const result = await installSandboxPacks({
+    entries: [{ pack: memoryPack({ withHook }) }],
+    pool,
+    engine,
+    clock,
+  });
+  expect(result.failed, JSON.stringify(result.failed)).toEqual([]);
+
+  const runOnce = () => {
+    // 必须重置 HP：本作"玩家 HP 跨场继承"是设计，不重置的话第二场的差异
+    // 来自 HP 而不是包的记忆，测的就不是我要测的东西了（这条测试第一版就踩了）
+    store.update((d) => {
+      d.player.hp = d.player.maxHp;
+      // metadata 里的 totalDamage/totalHeal/emptyLoops 是**整局累计**，
+      // 不清零就会得到"第二场正好是第一场的两倍"这种假差异
+      d.metadata.totalDamage = 0;
+      d.metadata.totalHeal = 0;
+      d.metadata.emptyLoops = 0;
+    });
+    engine.begin({ nodeId: 'node_hook', tier: 'normal' });
+    engine.runToEnd();
+    return battleFingerprint(store.getSnapshot());
+  };
+  return { first: runOnce(), second: runOnce(), host: result.host };
+}
+
+describe('fate.onBattleStart 钩子', () => {
+  it('不挂钩子：连续两场同种子结果不同（记忆跨战斗泄漏）', async () => {
+    const { first, second, host } = await fightWithPack({ withHook: false, seed: 4321 });
+    expect(host.list()[0].failed).toBe(false);
+    expect(second).not.toEqual(first);
+    host.dispose();
+  });
+
+  it('挂了钩子：每场开头清记忆 ⇒ 同种子连续两场重新逐字节相同', async () => {
+    const { first, second, host } = await fightWithPack({ withHook: true, seed: 4321 });
+    expect(host.list()[0].failed, host.list()[0].reason ?? 'no failure').toBe(false);
+    expect(second).toEqual(first);
+    host.dispose();
+  });
+
+  it('钩子里抛错只摘这个包，不弄崩开战', async () => {
+    const pool = createContentPool();
+    const official = await loadOfficialPool();
+    for (const kind of Object.keys(pool)) pool[kind] = new Map(official[kind]);
+    const store = new Store(createInitialState(9, { gcdSequence: ['blade.jab'], ogcdSlots: [] }));
+    const registry = new Registry();
+    let engine = null;
+    registerDefaultContracts({
+      store,
+      getRng: () => engine.getRng(),
+      getBuffTable: () => pool.buffs,
+      getAudioSink: () => null,
+      registry,
+    });
+    engine = new BattleEngine({ store, registry, pool });
+    const bad = createPack({
+      id: 'poc.badhook',
+      version: '1.0.0',
+      files: {
+        'main.js': `
+import { begin, onBattleStart } from 'fate';
+begin({ id: 'poc.badhook', version: '1.0.0' });
+onBattleStart(() => { throw new Error('钩子不想活'); });
+`,
+      },
+    });
+    const result = await installSandboxPacks({ entries: [{ pack: bad }], pool, engine, clock });
+    expect(result.failed).toEqual([]);
+    // 开战不能因为包的钩子炸了而失败
+    expect(() => engine.begin({ nodeId: 'n1', tier: 'normal' })).not.toThrow();
+    expect(result.host.getRecord('poc.badhook').failed).toBe(true);
+    result.host.dispose();
+  });
+});

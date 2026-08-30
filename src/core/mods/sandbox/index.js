@@ -40,10 +40,13 @@ function indexSources(pool) {
  *   pool: object,
  *   clock: () => number,
  *   host?: ReturnType<Awaited<ReturnType<typeof createSandboxHost>>>,
+ *   engine?: { registerHook: (phase: string, fn: Function) => unknown },
  * }} options
+ *   engine 传进来是为了把包的 fate.onBattleStart 接到开战钩子上 ——
+ *   不传也能跑（钩子被收集但不会被调用），测试里常常不需要引擎。
  * @returns {Promise<{host, ok: Array, failed: Array, overrides: Array, loaded: Array}>}
  */
-export async function installSandboxPacks({ entries, pool, clock, host: existingHost } = {}) {
+export async function installSandboxPacks({ entries, pool, clock, host: existingHost, engine } = {}) {
   const host = existingHost ?? (await createSandboxHost({ clock }));
   const ok = [];
   const failed = [];
@@ -82,6 +85,12 @@ export async function installSandboxPacks({ entries, pool, clock, host: existing
         }
       }
       const hash = entry.sha256 ?? (await hashPack(pack));
+      // 钩子按包注册顺序挂上（装包顺序本身是按 id 排过序的）：
+      // 钩子顺续会影响状态，所以它必须是确定的，不能取决于 Map 迭代巧合
+      if (engine !== null && engine !== undefined) {
+        const hooks = host.drainHooks(record);
+        for (const fn of hooks.battleStart) engine.registerHook('battleStart', fn);
+      }
       ok.push({ id: pack.id, version: pack.version, hash, provided, manifest: record.manifest });
       loaded.push({ id: pack.id, version: pack.version, sha256: hash?.hex ?? null, algo: hash?.algo ?? null });
     } catch (error) {

@@ -52,7 +52,7 @@ export class BattleEngine {
   #registry;
   #pool;
   #rng = null;
-  #hooks = { before: [], after: [] };
+  #hooks = { before: [], after: [], battleStart: [] };
   #audioSink = null;
   #liveAudioSink = null;
   #silentSink = null;
@@ -90,7 +90,7 @@ export class BattleEngine {
   }
 
   registerHook(phase, fn) {
-    if (phase !== 'before' && phase !== 'after') {
+    if (phase !== 'before' && phase !== 'after' && phase !== 'battleStart') {
       throw new FateError(`未知钩子阶段：${phase}`, { code: 'UNKNOWN_HOOK' });
     }
     this.#hooks[phase].push(fn);
@@ -140,6 +140,21 @@ export class BattleEngine {
       draft.player.buffs = new Map();
       draft.player.stats = { damageDealt: 0, damageTaken: 0, healDone: 0, skillsCast: 0 };
     });
+
+    /**
+     * 开战钩子。存在的理由不是性能，是**确定性**：第三方包可以用模块级
+     * 变量持有跨次施放的记忆（官方技能全是无状态的），那种记忆会活过整场
+     * 战斗，导致“同种子同序列但先打过一场”结果就不同。
+     * 有这个钩子，包就能在每场开头自己清掉记忆，把“单场可复现”拿回来。
+     *
+     * 按注册顺序执行（不并发、不随机）—— 钩子顺序本身就是确定性的一部分。
+     */
+    if (this.#hooks.battleStart.length > 0) {
+      const hookContext = this.#buildContext();
+      for (const hook of this.#hooks.battleStart) {
+        hook(hookContext, this.#store.unsafeGetState());
+      }
+    }
 
     return { encounter, monsters };
   }

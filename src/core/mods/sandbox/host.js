@@ -42,6 +42,8 @@ export const SANDBOX_SUPPORTED_KINDS = Object.freeze(['families', 'skills', 'buf
 const METHOD_TARGETS = Object.freeze({
   begin: null,
   finish: null,
+  /** 钩子不是内容：值本身就是函数，走单独一条跨界通道 */
+  onBattleStart: '__hook.battleStart',
   family: 'families',
   skill: 'skills',
   buff: 'buffs',
@@ -61,7 +63,8 @@ function assertApiContract() {
   const declared = [...fateApiKeys()];
   const missing = injected.filter((key) => !declared.includes(key));
   const forgotten = declared.filter(
-    (key) => !injected.includes(key) && key !== 'drainRegistrations' && key !== 'currentPackId',
+    (key) =>
+      !injected.includes(key) && key !== 'drainRegistrations' && key !== 'currentPackId' && key !== 'drainHooks',
   );
   if (missing.length > 0 || forgotten.length > 0) {
     throw new ModLoadError('沙箱注入的 fate API 与 fateApiKeys() 不一致', {
@@ -92,6 +95,9 @@ globalThis.__applyFn = (fn, ctx, argsJson) => {
   const args = JSON.parse(argsJson);
   return fn(ctx, args[0], args[1]);
 };
+// 钩子签名是 (ctx, state)，与技能的 (ctx, self, targets) 不同 —— 分开一条，
+// 不往 args 里塞 null 占位（那会让作者以为能拿到 targets）
+globalThis.__applyHook = (fn, ctx, stateJson) => fn(ctx, JSON.parse(stateJson));
 `;
 
 /** `'fate'` 的 ESM 门面。具名导出必须是静态的 —— 包作者写的是 `import { skill } from 'fate'`。 */
@@ -256,6 +262,7 @@ export async function createSandboxHost({
     }
     if (record.ctxHandle?.alive) record.ctxHandle.dispose();
     if (record.applyFn?.alive) record.applyFn.dispose();
+    if (record.hookFn?.alive) record.hookFn.dispose();
     if (record.collectRef?.alive) record.collectRef.dispose();
     record.vm.dispose();
     record.runtime.dispose();
@@ -283,6 +290,8 @@ export async function createSandboxHost({
       runtime,
       vm,
       registrations: [],
+      /** 已登记的钩子（battleStart 等） */
+      hooks: [],
       functions: new Map(),
       manifest: null,
       deadline: Number.POSITIVE_INFINITY,
@@ -360,6 +369,17 @@ export async function createSandboxHost({
             })
           : name === 'finish'
             ? vm.newFunction('finish', () => vm.undefined)
+            : name === 'onBattleStart'
+              ? vm.newFunction('onBattleStart', (fnHandle) => {
+                  if (vm.typeof(fnHandle) !== 'function') {
+                    fail(`${pack.id}: fate.onBattleStart 需要一个函数`);
+                    return vm.undefined;
+                  }
+                  const index = record.functions.size;
+                  record.functions.set(index, fnHandle.dup());
+                  record.hooks.push({ kind: 'battleStart', index });
+                  return vm.undefined;
+                })
             : vm.newFunction(name, (h) => {
                 const listHandle = vm.newString(listName);
                 const result = vm.callFunction(collectRef, vm.undefined, listHandle, h);
@@ -408,6 +428,7 @@ export async function createSandboxHost({
     vm.unwrapResult(vm.evalCode(PRELUDE, 'fate-prelude.js')).dispose();
     record.ctxHandle = vm.getProp(vm.global, '__ctx');
     record.applyFn = vm.unwrapResult(vm.evalCode('(fn, ctx, argsJson) => globalThis.__applyFn(fn, ctx, argsJson)', 'apply.js'));
+    record.hookFn = vm.unwrapResult(vm.evalCode('(fn, ctx, stateJson) => globalThis.__applyHook(fn, ctx, stateJson)', 'hook.js'));
 
     // ---- 模块加载器：'fate' → 门面；其余 → 包内文件（只认包内路径） ----
     const sources = new Map([['fate', fateModuleSource()]]);
@@ -527,6 +548,50 @@ export async function createSandboxHost({
     };
   }
 
+  /** 钩子跨界调用：签名 (ctx, state)。state 传快照 —— 钩子该清的是自己的记忆，不是战场 */
+  function bindHook(record, index) {
+    const { vm } = record;
+    return (context, state) => {
+      if (record.disposed || record.failed) return undefined;
+      const handle = record.functions.get(index);
+      if (handle === undefined) return undefined;
+      record.currentContext = context;
+      const stateJson = vm.newString(JSON.stringify(snapshotEntity(state)));
+      record.dirty = true;
+      enter(record);
+      try {
+        const result = vm.callFunction(record.hookFn, vm.undefined, handle, record.ctxHandle, stateJson);
+        if (result.error) {
+          const dumped = vm.dump(result.error);
+          result.error.dispose();
+          const message = typeof dumped === 'object' ? (dumped?.message ?? JSON.stringify(dumped)) : String(dumped);
+          markDead(record, `onBattleStart 抛错：${message}`);
+        } else {
+          result.value.dispose();
+        }
+      } catch (error) {
+        markDead(
+          record,
+          record.interrupted ? 'onBattleStart 超时被打断' : `onBattleStart 失败：${String(error?.message ?? error)}`,
+        );
+      } finally {
+        stateJson.dispose();
+        exit(record);
+        record.currentContext = null;
+      }
+      return undefined;
+    };
+  }
+
+  /** 取某个包登记的钩子（已绑成宿主可调用的函数）。 */
+  function drainHooks(record) {
+    const out = { battleStart: [] };
+    for (const hook of record.hooks) {
+      if (out[hook.kind] !== undefined) out[hook.kind].push(bindHook(record, hook.index));
+    }
+    return out;
+  }
+
   /**
    * 装包收尾：把注册数据里的函数索引换成真 JS 闭包，返回可以直接喂给
    * `mergeIntoPool` 的结果形状 `{ skills: [], buffs: [], ... }`。
@@ -548,6 +613,7 @@ export async function createSandboxHost({
     installPack,
     unloadPack,
     drainRegistrations,
+    drainHooks,
     getRecord: (id) => installed.get(id) ?? null,
     list: () =>
       [...installed.values()].map((r) => ({

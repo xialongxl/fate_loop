@@ -154,13 +154,17 @@ export async function createApp({
 
   const modLoad = await loadMods({ registry, modules });
   pool = modLoad.pool;
+  // engine 必须在装包**之前**建好：包的 fate.onBattleStart 要往它身上挂钩子。
+  // 契约里用的是惰性引用（getRng: () => engine.getRng()），所以提前建不影响装配。
+  engine = new BattleEngine({ store, registry, pool });
 
   /**
-   * 第三方包（S2）。三件事决定了它必须卡在这里：
+   * 第三方包（S2）。几件事决定了它必须卡在这里：
    *  1. **在 saveService.init() 之前** —— 装了包要切到隔离存档命名空间，
    *     而“装没装”得先知道；
    *  2. **在算指纹之前** —— 包会往池里塞内容，指纹必须反映它；
-   *  3. **沙箱代码本身是惰性 import 的** —— 没装包的玩家连 227KB 的
+   *  3. **在 engine 之后** —— 钩子要有地方挂；
+   *  4. **沙箱代码本身是惰性 import 的** —— 没装包的玩家连 227KB 的
    *     QuickJS wasm 都不该下（主包现在才 28KB）。
    */
   const packService = packs === undefined ? new PackService() : packs;
@@ -173,6 +177,7 @@ export async function createApp({
       const result = await installSandboxPacks({
         entries: enabled.entries,
         pool,
+        engine,
         clock: () => performance.now(),
       });
       packReport.ok = result.ok;
@@ -182,8 +187,6 @@ export async function createApp({
       sandboxHost = result.host;
     }
   }
-
-  engine = new BattleEngine({ store, registry, pool });
 
   await audio.init?.();
   engine.setAudioSinks({ live: audio, silent: nullAudio });

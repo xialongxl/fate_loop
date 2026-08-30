@@ -48,6 +48,8 @@ function openScope(id) {
   let scope = scopes.get(id);
   if (scope === undefined) {
     scope = Object.fromEntries(KINDS.map((kind) => [kind, []]));
+    // 钩子不是内容，单独一格；重复加载同一个包时也要重置
+    scope.hooks = { battleStart: [] };
     scopes.set(id, scope);
   }
   return scope;
@@ -79,6 +81,7 @@ export function begin(spec) {
   const scope = openScope(currentId);
   for (const kind of KINDS) scope[kind] = []; // 同一份源码被重复加载时不累加
   scope.manifest = { ...spec };
+  scope.hooks = { battleStart: [] };
   return scope.manifest;
 }
 
@@ -90,6 +93,36 @@ export const encounter = (spec) => collect('encounters', spec, 'encounter');
 export const shopItem = (spec) => collect('shopItems', spec, 'shopItem');
 export const event = (spec) => collect('events', spec, 'event');
 export const mapGenerator = (spec) => collect('mapGenerators', spec, 'mapGenerator');
+
+/**
+ * 注册"每场战斗开始时"的回调。
+ *
+ * 为什么第三方包需要它：包可以用模块级变量记住跨次施放的状态（官方技能全是
+ * 无状态的），而那种记忆会**活过整场战斗** —— 于是"同种子、同序列，但先打过
+ * 一场"就会算出不同结果，直接动摇本作"同种子必得同结果"的承诺。
+ * 有了这个钩子，包可以在每场开头自己把记忆清掉，把单场可复现性拿回来。
+ *
+ * 回调签名 (ctx, state)，只能走 ctx/ops 那套官方操作，跟技能一样。
+ */
+export function onBattleStart(fn) {
+  if (typeof fn !== 'function') {
+    throw new TypeError('fate.onBattleStart(fn) 需要一个函数');
+  }
+  if (currentId === null) {
+    throw new TypeError('fate.onBattleStart 之前必须先调用 fate.begin({ id, version })');
+  }
+  const scope = scopes.get(currentId);
+  scope.hooks.battleStart.push(fn);
+  return fn;
+}
+
+/** 取某个包的钩子列表（**不清空**，与 drainRegistrations 同样的可重复加载语义）。 */
+export function drainHooks(id = currentId) {
+  if (id === null || id === undefined) return { battleStart: [] };
+  const scope = scopes.get(id);
+  if (scope === undefined) return { battleStart: [] };
+  return { battleStart: [...scope.hooks.battleStart] };
+}
 
 /** 声明注册结束。构建期不强制，但沙箱期用它检测"包没注册完就结束"。 */
 export function finish() {
@@ -128,9 +161,11 @@ export function fateApiKeys() {
     'shopItem',
     'event',
     'mapGenerator',
+    'onBattleStart',
     'finish',
     'currentPackId',
     'drainRegistrations',
+    'drainHooks',
     // 常量：包作者不该去猜 core 里的字面量
     'SKILL_TYPE',
     'SKILL_RANGE',

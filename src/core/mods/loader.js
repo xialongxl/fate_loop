@@ -161,7 +161,12 @@ export function mergeIntoPool(pool, result, modId) {
     pool.events.set(event.id, normalizeEvent(event, modId));
   }
   for (const generator of result.mapGenerators ?? []) {
-    pool.mapGenerators.set(generator.id, generator);
+    /**
+     * 补 source：其它七类都经 normalize*(x, source) 带上来源，只有生成器是直接塞
+     * 进池的 —— 结果模组屏按来源统计时它显示成 "?"，而"哪个包换了地图"恰恰是
+     * 最该看得见的一条信息。
+     */
+    pool.mapGenerators.set(generator.id, { ...generator, source: modId });
   }
   for (const family of result.families ?? []) {
     if (typeof family?.id !== 'string' || family.id === '') {

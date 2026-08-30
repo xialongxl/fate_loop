@@ -38,12 +38,26 @@ async function freshAdapters() {
   }
 }
 
-async function boot(packs, seed = 4242) {
+/** 官方四组 + 示例包：真实 app 走 import.meta.glob 会带上示例包，测试要自己注入 */
+function modulesWithExample() {
+  const dir = '/src/mods/dev/example-pack';
+  return [
+    ...officialModuleEntries(),
+    {
+      path: `${dir}/manifest.js`,
+      dir,
+      loadManifest: async () => await import(`../../src/mods/dev/example-pack/manifest.js`),
+      loadSetup: async () => await import(`../../src/mods/dev/example-pack/setup.js`),
+    },
+  ];
+}
+
+async function boot(packs, seed = 4242, modules = modulesWithExample()) {
   document.body.innerHTML = '<div id="app"></div>';
   return createApp({
     root: document.querySelector('#app'),
     seed,
-    modules: officialModuleEntries(),
+    modules,
     audio: nullAudio,
     packs,
   });
@@ -139,6 +153,19 @@ describe('模组屏（S3）', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   };
+  /**
+   * 等确认弹层出现。**别用固定 tick 数**：安装路径上还有动态 import
+   * （zip 要现拉 fflate），固定次数就是撞运气。
+   */
+  const waitForDialog = async (label, rounds = 40) => {
+    for (let i = 0; i < rounds; i += 1) {
+      await flush(2);
+      const box = document.querySelector('.dialog-box');
+      if (box !== null) return box;
+    }
+    throw new Error(`${label}：等不到确认弹层`);
+  };
+
   /** 点掉确认弹层（安装/卸载都会问一句，不点是改不了的） */
   const confirmDialog = (label) => {
     const box = document.querySelector('.dialog-box');
@@ -152,8 +179,43 @@ describe('模组屏（S3）', () => {
     const packs = await new PackService().init();
     const app = await boot(packs);
     const el = await openMods(app);
-    expect(el.querySelector('.mod-card.is-empty').textContent).toContain('还没有安装');
-    expect(el.querySelectorAll('.mod-card').length).toBe(1);
+    const third = el.querySelector('[data-slot="section-third"]');
+    expect(third.querySelector('.mod-card.is-empty').textContent).toContain('还没有安装任何第三方包');
+    // 空态只属于第三方那一段 —— 官方内容是实打实存在的，不能跟着一起"空"
+    expect(third.querySelectorAll('.mod-card').length).toBe(1);
+    app.destroy();
+  });
+
+  it('官方内容分核心包与示例包两段显示，且不给启停/卸载按钮', async () => {
+    const packs = await new PackService().init();
+    const app = await boot(packs);
+    const el = await openMods(app);
+
+    const core = [...el.querySelectorAll('[data-slot="core-list"] .mod-card')];
+    // 按集合比，不按顺序：官方包的先后由模组拓扑排序决定，那是实现细节，
+    // 拿顺序做断言等于把测试绑在一个随时会变的排写上
+    expect(core.map((n) => n.getAttribute('data-id')).sort()).toEqual([
+      'official.core-encounters',
+      'official.core-map',
+      'official.core-monsters',
+      'official.core-skills',
+    ]);
+    // 内容数量要看得见（这是"官方到底装了什么"的唯一入口）
+    const skills = core.find((n) => n.getAttribute('data-id') === 'official.core-skills');
+    expect(skills.querySelector('.mod-contents').textContent).toContain('90 技能');
+    expect(skills.querySelector('.mod-contents').textContent).toContain('6 流派');
+    // 地图生成器以前没有 source，统计会显示成"（无内容）"
+    const mapPack = core.find((n) => n.getAttribute('data-id') === 'official.core-map');
+    expect(mapPack.querySelector('.mod-contents').textContent).toContain('1 地图生成器');
+
+    const dev = [...el.querySelectorAll('[data-slot="dev-list"] .mod-card')];
+    expect(dev.map((n) => n.getAttribute('data-id'))).toEqual(['dev.example-pack']);
+    expect(dev[0].querySelector('.mod-title').textContent).toContain('示例包');
+    expect(dev[0].querySelector('.mod-contents').textContent).toContain('6 技能');
+
+    // 官方卡片上不该有任何操作按钮：启停/卸载对构建期内容没有意义
+    expect(el.querySelectorAll('[data-slot="core-list"] button, [data-slot="dev-list"] button').length).toBe(0);
+    expect(core[0].querySelector('.mod-state').textContent.trim()).toBe('构建期');
     app.destroy();
   });
 
@@ -163,7 +225,7 @@ describe('模组屏（S3）', () => {
     await packs.install({ ...PACK, title: '星爆包' });
     const el = await openMods(app);
 
-    const card = el.querySelector('.mod-card');
+    const card = el.querySelector('[data-slot="section-third"] .mod-card');
     expect(card.querySelector('.mod-title').textContent).toBe('星爆包');
     expect(card.querySelector('.mod-state').textContent.trim()).toBe('未生效');
     expect(card.querySelector('.mod-hash code').textContent).toMatch(/^[0-9a-f]{8,}$/);
@@ -182,10 +244,11 @@ describe('模组屏（S3）', () => {
     await packs.install({ ...PACK });
     const app = await boot(packs);
     const el = await openMods(app);
-    expect(el.querySelector('.mod-state.is-live')).not.toBeNull();
-    expect(el.querySelector('.mod-state').textContent.trim()).toBe('已生效');
+    const third = el.querySelector('[data-slot="section-third"]');
+    expect(third.querySelector('.mod-state.is-live')).not.toBeNull();
+    expect(third.querySelector('.mod-state').textContent.trim()).toBe('已生效');
 
-    el.querySelector('[data-act="remove"]').click();
+    third.querySelector('[data-act="remove"]').click();
     await flush();
     confirmDialog('卸载');
     await flush();
@@ -214,7 +277,7 @@ describe('模组屏（S3）', () => {
     await packs.install({ ...PACK });
     const app = await boot(packs);
     const el = await openMods(app);
-    el.querySelector('[data-act="source"]').click();
+    el.querySelector('[data-slot="section-third"] [data-act="source"]').click();
     await flush(6);
     const pre = document.querySelector('.mod-src');
     expect(pre).not.toBeNull();
@@ -235,9 +298,9 @@ describe('模组屏（S3）', () => {
     const file = new File([PACK.files['main.js']], 'poc.app@2.0.0.js', { type: 'text/javascript' });
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
     input.dispatchEvent(new Event('change'));
-    await flush(4);
+    await waitForDialog('安装');
     confirmDialog('安装');
-    await flush(4);
+    await flush(6);
     const rows = await packs.list();
     expect(rows[0]).toMatchObject({ id: 'poc.app', version: '2.0.0' });
     app.destroy();
@@ -266,14 +329,19 @@ describe('zip 包安装（S2b-4）', () => {
     const stub = { name: 'poc.zip@1.2.3.zip', arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
     Object.defineProperty(input, 'files', { value: [stub], configurable: true });
     input.dispatchEvent(new Event('change'));
-    await flush();
 
-    const box = document.querySelector('.dialog-box');
+    // zip 分支要先动态 import fflate 再解压 ⇒ 必须轮询等弹层。
+    // 固定 tick 数在这里会通过得**毫无意义**：它测的是"这 6 个宏任务够不够"
+    let box = null;
+    for (let i = 0; i < 40 && box === null; i += 1) {
+      await flush(2);
+      box = document.querySelector('.dialog-box');
+    }
     expect(box, 'zip 安装也要过确认弹层').not.toBeNull();
     expect(box.textContent).toContain('poc.zip');
     expect(box.textContent).toContain('2 个文件');
     box.querySelector('[data-confirm]').click();
-    await flush();
+    await flush(6);
 
     const rows = await packs.list();
     expect(rows[0]).toMatchObject({ id: 'poc.zip', version: '1.2.3', files: 2 });
@@ -292,10 +360,14 @@ describe('zip 包安装（S2b-4）', () => {
     const stub = { name: 'poc.bomb.zip', arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
     Object.defineProperty(input, 'files', { value: [stub], configurable: true });
     input.dispatchEvent(new Event('change'));
-    await flush();
 
-    const toast = document.querySelector('.app-toast');
-    expect(toast.hidden).toBe(false);
+    let toast = null;
+    for (let i = 0; i < 40 && toast === null; i += 1) {
+      await flush(2);
+      const node = document.querySelector('.app-toast');
+      if (node !== null && !node.hidden && node.textContent !== '') toast = node;
+    }
+    expect(toast, '炸弹包必须给出可读原因，不能静默').not.toBeNull();
     expect(toast.textContent).toMatch(/解包失败|解压后超过/);
     expect(await packs.list()).toHaveLength(0);
     app.destroy();

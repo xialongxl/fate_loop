@@ -511,6 +511,36 @@ export async function createApp({
 
     [SCREEN.MODS]: createModsScreen({
       listPacks: () => packService.list(),
+      /**
+       * 官方包（核心 / 示例）来自构建期加载结果，内容数量按 pool 里的 source 归组。
+       * 它们**没有**启停与卸载入口 —— 不是 UI 偷懒，是这三类操作对构建期内容
+       * 根本没有意义：内容已经打进产物了。
+       */
+      listOfficialPacks: () => {
+        const bySource = new Map();
+        for (const kind of Object.keys(pool)) {
+          for (const spec of pool[kind].values()) {
+            const source = spec?.source ?? '(未知来源)';
+            const row = bySource.get(source) ?? {};
+            row[kind] = (row[kind] ?? 0) + 1;
+            bySource.set(source, row);
+          }
+        }
+        const titles = {
+          'official.core-skills': '核心 · 技能与流派',
+          'official.core-monsters': '核心 · 怪物',
+          'official.core-encounters': '核心 · 遭遇 / 商品 / 事件',
+          'official.core-map': '核心 · 地图生成',
+          'dev.example-pack': '示例包 · 虚空（教学用）',
+        };
+        return modLoad.loaded.map((mod) => ({
+          id: mod.id,
+          version: mod.version,
+          title: titles[mod.id] ?? mod.id,
+          group: mod.id.startsWith('official.') ? 'core' : 'dev',
+          counts: bySource.get(mod.id) ?? {},
+        }));
+      },
       getReport: () => packReport,
       onInstallFile: safe((file) => void installPackFile(file)),
       onToggle: safe(async (id, enabled) => {

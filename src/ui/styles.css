@@ -2655,6 +2655,51 @@ code {
   margin-bottom: 12px;
 }
 
+/* 模组屏分段：核心包 / 示例包 / 第三方包 */
+.mod-section {
+  margin-bottom: 18px;
+}
+
+.mod-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-transform: none;
+}
+
+.mod-section-note {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+/* 官方包卡片：没有操作按钮，视觉上就该比第三方那批"退一层" */
+.mod-card.is-official {
+  background: var(--bg-inset);
+  border-style: dashed;
+}
+
+.mod-card.is-official .mod-title {
+  font-weight: 500;
+}
+
+.mod-state.is-locked {
+  border-style: dotted;
+  color: var(--text-dim);
+}
+
+.mod-contents {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .mod-alert {
   margin: 0 0 8px;
   padding: 8px 11px;

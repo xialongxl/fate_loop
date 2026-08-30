@@ -309,4 +309,5 @@ export const SCREEN = Object.freeze({
   CHARACTER: 'character',
   CODEX: 'codex',
   HISTORY: 'history',
+  MODS: 'mods',
 });

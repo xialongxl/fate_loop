@@ -14,26 +14,12 @@
 
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const SCREENS = [
-  'menu',
-  'map',
-  'battle',
-  'sequence',
-  'equipment',
-  'character',
-  'saves',
-  'settings',
-  'codex',
-  'history',
-  'shop',
-  'event',
-  'victory',
-];
+import { AUDIT_SCREENS as SCREENS } from './screenList.js';
 
 const BROWSER_CANDIDATES = [
   process.env.UI_AUDIT_BROWSER,
@@ -143,15 +129,32 @@ if (args.shots !== null) {
   mkdirSync(args.shots, { recursive: true });
 }
 
-const profile = join(tmpdir(), `ui-audit-profile-${process.pid}`);
-const baseFlags = [
-  '--headless',
-  '--disable-gpu',
-  '--no-sandbox',
-  '--disable-software-rasterizer',
-  '--hide-scrollbars',
-  `--user-data-dir=${toNativePath(profile)}`,
-];
+/**
+ * 每个浏览器实例一个**独立** profile 目录。
+ *
+ * 以前是整个 run.mjs 共用一个。后果很隐蔽：上一个 Edge 实例还在收尾（它有一堆
+ * helper 进程抢着释放 profile 锁），下一个实例一看目录被占就直接把命令行交给
+ * 前者然后自己退出 —— 输出 0 字节，于是那个组合被算成"布局有问题"。
+ * 单独跑 --only=shop 能过、全量跑不过，就是这一条。交接文档里记过同样的坑，
+ * 这次是它自己长在了工具里。
+ */
+const createdProfiles = [];
+function newProfileDir(label) {
+  const dir = join(tmpdir(), `ui-audit-profile-${process.pid}-${label}-${createdProfiles.length}`);
+  createdProfiles.push(dir);
+  return dir;
+}
+
+function baseFlags(profile) {
+  return [
+    '--headless',
+    '--disable-gpu',
+    '--no-sandbox',
+    '--disable-software-rasterizer',
+    '--hide-scrollbars',
+    `--user-data-dir=${toNativePath(profile)}`,
+  ];
+}
 
 /**
  * 预检：浏览器能不能跑。
@@ -161,7 +164,7 @@ const baseFlags = [
  */
 async function browserPreflight() {
   const { stdout, stderr } = await runBrowser(browserPath, [
-    ...baseFlags,
+    ...baseFlags(newProfileDir('preflight')),
     '--window-size=800,600',
     '--virtual-time-budget=8000',
     '--dump-dom',
@@ -173,6 +176,8 @@ async function browserPreflight() {
 let server = null;
 const results = [];
 let failures = 0;
+/** 浏览器没产出（环境问题），与"UI 真有问题"分开计 */
+let envFailures = 0;
 
 try {
   const preflight = await browserPreflight();
@@ -192,7 +197,7 @@ try {
 
   // 预热：让 vite 把依赖图与模块转译跑完，否则第一个界面几乎必然超时误报
   await runBrowser(browserPath, [
-    ...baseFlags,
+    ...baseFlags(newProfileDir('warmup')),
     '--window-size=1440,900',
     `--virtual-time-budget=${args.budget}`,
     '--dump-dom',
@@ -203,9 +208,10 @@ try {
     const [width, height] = view.split('x');
     for (const screen of args.only) {
       const url = `${baseUrl}tools/ui-audit/audit-page.html?screen=${encodeURIComponent(screen)}`;
+      const profile = newProfileDir(`${screen}-${view}`);
       if (args.shots !== null) {
         await runBrowser(browserPath, [
-          ...baseFlags,
+          ...baseFlags(profile),
           `--window-size=${width},${height}`,
           `--virtual-time-budget=${args.budget}`,
           `--screenshot=${toNativePath(join(args.shots, `${screen}-${view}.png`))}`,
@@ -213,7 +219,7 @@ try {
         ]);
       }
       let { stdout, stderr } = await runBrowser(browserPath, [
-        ...baseFlags,
+        ...baseFlags(profile),
         `--window-size=${width},${height}`,
         `--virtual-time-budget=${args.budget}`,
         '--dump-dom',
@@ -224,7 +230,7 @@ try {
         // 首屏要等 vite 现编译依赖图，虚拟时间预算不够就会误报"没拿到结果"。
         // 重试一次并放宽预算，比直接判失败诚实。
         ({ stdout, stderr } = await runBrowser(browserPath, [
-          ...baseFlags,
+          ...baseFlags(newProfileDir(`${screen}-${view}-retry`)),
           `--window-size=${width},${height}`,
           `--virtual-time-budget=${args.budget * 2}`,
           '--dump-dom',
@@ -233,6 +239,13 @@ try {
         audit = extractAudit(stdout);
       }
       if (audit === null) {
+        if (stdout.trim() === '') {
+          // 零输出 = 浏览器根本没把页面跑起来，不是布局问题。算进环境失败，
+          // 退出码与提示都跟"UI 有问题"分开（否则又得靠人去猜是哪一种）。
+          envFailures += 1;
+          console.error(`   ${screen} ${view}：浏览器零输出（实例可能被上一个接管，或启动失败）`);
+          continue;
+        }
         failures += 1;
         results.push({ screen, view, ok: false, problems: ['没拿到体检结果（页面报错或超时）'], metrics: {} });
         console.error(`   stderr: ${stderr.split('\n').slice(0, 2).join(' ')}`);
@@ -253,6 +266,23 @@ try {
 } finally {
   if (server !== null && server !== undefined) server.child.kill('SIGKILL');
   await sleep(200);
+  // 只删自己建的那几个临时 profile（createdProfiles 里记着的），
+  // 绝不碰用户的浏览器配置目录。
+  for (const dir of createdProfiles) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /*  Windows 下文件可能还被 helper 进程握着，下次跑前会是空的 */
+    }
+  }
+}
+
+if (envFailures > 0) {
+  console.error(
+    `\n\x1b[31m环境问题\x1b[0m：${envFailures} 个组合浏览器零输出，结果不可信。` +
+      '这不是布局问题 —— 先查是不是有残留浏览器实例抢占了 profile。',
+  );
+  process.exit(3);
 }
 
 console.log(

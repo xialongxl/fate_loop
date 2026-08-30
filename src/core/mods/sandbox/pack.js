@@ -105,6 +105,28 @@ export function createPack(spec) {
   return Object.freeze({ id, version, entry, files: new Map(files), bytes });
 }
 
+/**
+ * 从文件名推包身份：`poc.app@1.2.3.js` / `poc.app-1.2.3.js` / `poc.app.js`。
+ *
+ * 为什么允许推：玩家拿到的是一个文件，要求他先读源码再手填 id 是把人往回逼。
+ * 但推出来的东西**必须显示在安装确认里** —— 静默改身份才是真坑。
+ * 不合规字符直接换 `-`，并保证 `作者.名字` 至少一个点（ID_RE 的要求）。
+ */
+export function derivePackIdentity(fileName) {
+  const base = String(fileName ?? '').replace(/\.[^.]*$/, '').trim();
+  const withVersion = /^(.+)[@-](\d+\.\d+\.\d+)$/.exec(base);
+  const rawId = withVersion === null ? base : withVersion[1];
+  let id = rawId
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .replace(/[^a-z0-9]+$/, '');
+  if (id === '') id = 'unnamed';
+  if (!id.includes('.')) id = `local.${id}`;
+  // 版本号缺省时是 0.0.0 —— 它不是装饰，是"装了哪一版"的记录起点
+  return { id, version: withVersion === null ? '0.0.0' : withVersion[2] };
+}
+
 /** 单个 .js 文件 → 一个包。给"直接拖一个脚本进来"这条最短路径用。 */
 export function packFromSingleFile(text, { id, version, fileName = DEFAULT_ENTRY } = {}) {
   return createPack({ id, version, files: new Map([[fileName, String(text ?? '')]]) });

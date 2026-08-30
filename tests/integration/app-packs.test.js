@@ -8,7 +8,7 @@
  * 那是"存档没了"，不是小 bug。
  */
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createApp } from '../../src/main.js';
 import { officialModuleEntries } from '../helpers.js';
 import { nullAudio } from '../../src/ui/audio/nullAudio.js';
@@ -123,5 +123,123 @@ skill({ id: 'poc.broken.a', type: 'GCD', gcdCost: 2.4, execute: () => {} });
     const again = await boot(packs, 5);
     expect(again.fingerprint.hash).toBe(hashWith);
     again.destroy();
+  });
+});
+
+describe('模组屏（S3）', () => {
+  /** 进到模组屏并渲染一次。 */
+  async function openMods(app) {
+    app.router.go(SCREEN.MODS);
+    app.screens[SCREEN.MODS].onEnter();
+    await flush();
+    return app.screens[SCREEN.MODS].element;
+  }
+  const flush = async (times = 3) => {
+    for (let i = 0; i < times; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  };
+  /** 点掉确认弹层（安装/卸载都会问一句，不点是改不了的） */
+  const confirmDialog = (label) => {
+    const box = document.querySelector('.dialog-box');
+    expect(box, `${label}：应该弹确认`).not.toBeNull();
+    const button = box.querySelector('[data-confirm]');
+    expect(button, `${label}：确认按钮应在`).not.toBeNull();
+    button.click();
+  };
+
+  it('主菜单进得去；没装包时是明确的空态而不是半张表', async () => {
+    const packs = await new PackService().init();
+    const app = await boot(packs);
+    const el = await openMods(app);
+    expect(el.querySelector('.mod-card.is-empty').textContent).toContain('还没有安装');
+    expect(el.querySelectorAll('.mod-card').length).toBe(1);
+    app.destroy();
+  });
+
+  it('装了但没重载：状态写「未生效」并给出重载入口（不假装热生效）', async () => {
+    const packs = await new PackService().init();
+    const app = await boot(packs);
+    await packs.install({ ...PACK, title: '星爆包' });
+    const el = await openMods(app);
+
+    const card = el.querySelector('.mod-card');
+    expect(card.querySelector('.mod-title').textContent).toBe('星爆包');
+    expect(card.querySelector('.mod-state').textContent.trim()).toBe('未生效');
+    expect(card.querySelector('.mod-hash code').textContent).toMatch(/^[0-9a-f]{8,}$/);
+    expect(el.querySelector('[data-slot="reload"]').hidden).toBe(true);
+
+    card.querySelector('[data-act="toggle"]').click();
+    await flush();
+    expect((await packs.list())[0].enabled).toBe(false);
+    // 改完必须让玩家知道"要重载才生效"
+    expect(el.querySelector('[data-slot="reload"]').hidden).toBe(false);
+    app.destroy();
+  });
+
+  it('启动时装好的包标「已生效」；卸载入口真的从库里删掉', async () => {
+    const packs = await new PackService().init();
+    await packs.install({ ...PACK });
+    const app = await boot(packs);
+    const el = await openMods(app);
+    expect(el.querySelector('.mod-state.is-live')).not.toBeNull();
+    expect(el.querySelector('.mod-state').textContent.trim()).toBe('已生效');
+
+    el.querySelector('[data-act="remove"]').click();
+    await flush();
+    confirmDialog('卸载');
+    await flush();
+    expect(await packs.list()).toHaveLength(0);
+    app.destroy();
+  });
+
+  it('包加载失败与覆盖官方内容都会出现在告警区（不能只写进 console）', async () => {
+    const packs = await new PackService().init();
+    const app = await boot(packs);
+    app.packReport.failed.push({ id: 'poc.broken', reason: '疑似死循环' });
+    app.packReport.overrides.push({ id: 'blade.jab', kind: 'skills', was: 'official.core-skills', by: 'poc.x' });
+    const el = await openMods(app);
+    // 断言 render 的 promise 真的 resolve：DOM 更新之后才抛的错，
+    // 只看 innerHTML 是查不出来的（el.toggle() 那个坑就是这么漏过 jsdom 的）
+    await expect(app.screens[SCREEN.MODS].render()).resolves.toBeUndefined();
+    await flush();
+    const alerts = [...el.querySelectorAll('.mod-alert')].map((n) => n.textContent);
+    expect(alerts.some((t) => t.includes('poc.broken') && t.includes('疑似死循环'))).toBe(true);
+    expect(alerts.some((t) => t.includes('blade.jab') && t.includes('official.core-skills'))).toBe(true);
+    app.destroy();
+  });
+
+  it('看源码：装的是别人写的代码，必须能打开看', async () => {
+    const packs = await new PackService().init();
+    await packs.install({ ...PACK });
+    const app = await boot(packs);
+    const el = await openMods(app);
+    el.querySelector('[data-act="source"]').click();
+    await flush(6);
+    const pre = document.querySelector('.mod-src');
+    expect(pre).not.toBeNull();
+    expect(pre.textContent).toContain("import { begin, skill");
+    app.destroy();
+  });
+
+  it('安装入口走文件选择器；身份从文件名推且展示给玩家', async () => {
+    const packs = await new PackService().init();
+    const app = await boot(packs);
+    const el = await openMods(app);
+    const input = el.querySelector('[data-slot="file"]');
+    const spy = vi.spyOn(input, 'click');
+    el.querySelector('[data-act="install"]').click();
+    expect(spy).toHaveBeenCalled();
+
+    // 直接喂一个 File 进 change：走完整安装路径（含真实确认弹层，不打桩）
+    const file = new File([PACK.files['main.js']], 'poc.app@2.0.0.js', { type: 'text/javascript' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    await flush(4);
+    confirmDialog('安装');
+    await flush(4);
+    const rows = await packs.list();
+    expect(rows[0]).toMatchObject({ id: 'poc.app', version: '2.0.0' });
+    app.destroy();
   });
 });

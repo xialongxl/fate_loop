@@ -57,6 +57,8 @@ import { createEquipmentScreen } from './ui/screens/equipmentScreen.js';
 import { createSequenceScreen } from './ui/screens/sequenceScreen.js';
 import { createSavesScreen } from './ui/screens/saves.js';
 import { createSettingsScreen } from './ui/screens/settings.js';
+import { createModsScreen } from './ui/screens/mods.js';
+import { derivePackIdentity } from './core/mods/sandbox/pack.js';
 import { createCodexScreen } from './ui/screens/codex.js';
 import { createHistoryScreen } from './ui/screens/history.js';
 
@@ -497,6 +499,26 @@ export async function createApp({
         await saveService.deleteSlot(slotId);
         notify('已删除', 'info');
       },
+      onBack: () => router.back(SCREEN.MAIN_MENU),
+    }),
+
+    [SCREEN.MODS]: createModsScreen({
+      listPacks: () => packService.list(),
+      getReport: () => packReport,
+      onInstallFile: safe((file) => void installPackFile(file)),
+      onToggle: safe(async (id, enabled) => {
+        await packService.setEnabled(id, enabled);
+        notify(enabled ? '已启用，重载后生效' : '已停用，重载后生效', 'info');
+      }),
+      onRemove: safe(async (id) => {
+        const sure = await confirm(`卸载包 ${id}？它注册的内容会随之消失，`
+          + '相关存档仍在隔离命名空间里，装了包还能读回。', { confirmLabel: '卸载' });
+        if (!sure) return;
+        await packService.remove(id);
+        notify('已卸载，重载后生效', 'info');
+      }),
+      onViewSource: safe(async (id) => void viewPackSource(id)),
+      onReload: () => void reloadForPacks(),
       onBack: () => router.back(SCREEN.MAIN_MENU),
     }),
 
@@ -982,10 +1004,101 @@ export async function createApp({
   }
 
   /** 导入：解析 → 校验 → 列明要写进哪些槽位 → 一次确认 → 落盘并读回第一个。 */
+  /**
+   * 读文本文件。`file.text()` 是标准 API，但**不是所有环境都有**
+   * （jsdom 的 File 就没有；老 Safari 也要到 14 才有）—— 没有回退的话
+   * 表现为"点了没反应"，比报错更难查。
+   */
+  function readTextFile(file) {
+    if (typeof file?.text === 'function') return file.text();
+    return new Promise((resolve, reject) => {
+      const Reader = typeof FileReader === 'function' ? FileReader : null;
+      if (Reader === null) {
+        reject(new Error('这个环境既没有 File.text() 也没有 FileReader，无法读取文件'));
+        return;
+      }
+      const reader = new Reader();
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(reader.error ?? new Error('读取失败'));
+      reader.readAsText(file);
+    });
+  }
+
+  /**
+   * 安装一个本地包。三件不可省的事：
+   *  1. **身份从文件名推，但推出来什么就展示什么** —— 静默改 id 会让玩家
+   *     下次完全认不出自己装过哪个；
+   *  2. 确认弹里说清"这会改变指纹与存档命名空间"；这句话不提前讲，
+   *     玩家会在"我的存档去哪了"里绕半天；
+   *  3. 装完不热重载，只标脏（理由见 screens/mods.js 顶部）。
+   */
+  async function installPackFile(file) {
+    let text = '';
+    try {
+      text = await readTextFile(file);
+    } catch (error) {
+      notify(`读取文件失败：${String(error?.message ?? error)}`, 'warn');
+      return;
+    }
+    const identity = derivePackIdentity(file.name ?? 'pack.js');
+    const sure = await confirm(
+      `安装为 ${identity.id}（版本 ${identity.version}），来源文件"${String(file.name ?? '')}"。\n` +
+        '第三方包会改变内容指纹，并把存档切到独立命名空间。',
+      { confirmLabel: '安装' },
+    );
+    if (!sure) return;
+    const result = await packService.install({
+      ...identity,
+      title: String(file.name ?? identity.id),
+      files: { 'main.js': text },
+    });
+    if (!result.ok) {
+      notify(`安装失败：${result.reason}`, 'warn');
+      return;
+    }
+    screens[SCREEN.MODS].markDirty();
+    notify(`已安装 ${result.pack.id}，重载页面后生效`, 'info');
+  }
+
+  /** 看源码：装的是别人写的代码，打不开看就等于让人信一个黑箱。 */
+  async function viewPackSource(id) {
+    const loaded = await packService.load(id);
+    if (loaded === null) {
+      notify('这个包的源文件读不回来，建议卸载后重装', 'warn');
+      return;
+    }
+    const box = dialog.open('', { wide: true });
+    const sections = [...loaded.pack.files.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(
+        ([path, src]) =>
+          `<h3 class="mod-src-file">${escapeHtml(path)}</h3>\n        <pre class="mod-src">${escapeHtml(src)}</pre>`,
+      )
+      .join('');
+    box.innerHTML = `
+      <h2 tabindex="-1">包源码 · ${escapeHtml(loaded.pack.id)}</h2>
+      <p class="dialog-text">版本 ${escapeHtml(loaded.pack.version)} · ${loaded.pack.files.size} 个文件</p>
+      ${sections}`;
+  }
+
+  /**
+   * 重载。不做热重载是**故意**的：内容池冻结、解锁表开局算完、
+   * 各屏都持着 pool 引用 —— 热重载会留下一堆半新半旧的状态，
+   * 那比不重载更容易出"看不出原因"的 bug。
+   */
+  async function reloadForPacks() {
+    await saveService.flush();
+    if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
+      window.location.reload();
+      return;
+    }
+    notify('这个环境里没有 location.reload，请手动刷新页面', 'warn');
+  }
+
   async function importFile(file) {
     let text = '';
     try {
-      text = await file.text();
+      text = await readTextFile(file);
     } catch (error) {
       notify(`读取文件失败：${String(error?.message ?? error)}`, 'warn');
       return;

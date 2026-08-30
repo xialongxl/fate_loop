@@ -138,6 +138,7 @@ export default [
         URL: 'readonly',
         Blob: 'readonly',
         File: 'readonly',
+        FileReader: 'readonly',
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
         localStorage: 'readonly',
@@ -218,6 +219,9 @@ export default [
         queueMicrotask: 'readonly',
         // 测试里用 URL 把仓库路径转 file: URL（jsdom 环境不提供）
         URL: 'readonly',
+        // 驱动文件选择器与 change 事件（jsdom 提供，但它是浏览器全局）
+        File: 'readonly',
+        Event: 'readonly',
       },
     },
     rules: {

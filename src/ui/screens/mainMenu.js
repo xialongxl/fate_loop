@@ -55,6 +55,10 @@ export function createMainMenuScreen({
           <span class="menu-btn-icon" aria-hidden="true">⏱</span>
           <span class="menu-btn-body"><strong>历史战绩</strong><small>最近 50 次轮回</small></span>
         </button>
+        <button type="button" class="menu-btn" data-act="mods">
+          <span class="menu-btn-icon" aria-hidden="true">⌘</span>
+          <span class="menu-btn-body"><strong>模组</strong><small>安装与管理第三方包</small></span>
+        </button>
       </div>
 
       <p class="menu-foot">纯文字 · 纯单机 · 模组驱动 · 同种子必得同结果</p>
@@ -85,6 +89,7 @@ export function createMainMenuScreen({
       settings: SCREEN.SETTINGS,
       codex: SCREEN.CODEX,
       history: SCREEN.HISTORY,
+      mods: SCREEN.MODS,
     };
     if (map[act] !== undefined) onOpen(map[act]);
   });

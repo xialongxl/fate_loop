@@ -21,22 +21,10 @@ const params = new URLSearchParams(location.search);
 const target = params.get('screen') ?? 'menu';
 const seed = Number(params.get('seed') ?? 20240101);
 
-/** 可驱动的界面。新增屏幕时在这里补一行，run.mjs 会自动跟上。 */
-export const SCREENS = Object.freeze([
-  'menu',
-  'map',
-  'battle',
-  'sequence',
-  'equipment',
-  'character',
-  'saves',
-  'settings',
-  'codex',
-  'history',
-  'shop',
-  'event',
-  'victory',
-]);
+/** 界面清单单一来源在 screenList.js（两边各写一份时，加屏幕会“体检悄悄少量一屏”）。 */
+import { AUDIT_SCREENS as SCREENS } from './screenList.js';
+
+export { SCREENS };
 
 const app = await createApp({ root: document.querySelector('#app'), seed });
 const store = app.store;
@@ -165,6 +153,32 @@ switch (target) {
   }
   default: {
     await buildProgress();
+    // 模组屏要量的是**满载态**：长标题、三条告警、重载横幅。空屏量不出排版问题。
+    // 注意这里只写库与报告对象，不重启应用 —— 体检要的是画面，不是真装包。
+    if (target === 'mods') {
+      const { PackService } = await import('/src/persistence/packs.js');
+      const packService = app.packs ?? (await new PackService().init());
+      await packService.install({
+        id: 'audit.long-title-pack',
+        version: '10.2.1',
+        title: '一个长得会撞破布局的模组名字 · 附赠中文与英文混排',
+        author: 'audit-fixture',
+        files: { 'main.js': 'import { begin } from "fate"; begin({ id: "audit.long-title-pack", version: "10.2.1" });' },
+      });
+      await packService.install({
+        id: 'audit.small',
+        version: '0.1.0',
+        title: '小包',
+        files: { 'main.js': 'import { begin } from "fate"; begin({ id: "audit.small" });' },
+      });
+      app.packReport.failed.push({ id: 'audit.broken', reason: '执行超过 400ms 被打断（疑似死循环）' });
+      app.packReport.overrides.push({
+        id: 'blade.jab',
+        kind: 'skills',
+        was: 'official.core-skills',
+        by: 'audit.long-title-pack',
+      });
+    }
     const screen = SCREEN[target.toUpperCase()];
     if (screen === undefined) throw new Error(`未知界面：${target}`);
     app.router.go(screen);
@@ -198,6 +212,23 @@ const expected = {
 };
 if (PRECONDITIONS[target] !== undefined && !PRECONDITIONS[target]()) {
   problems.push(`用例没进到预期状态（${expected[target]}），下面的量测不可信`);
+}
+
+// 异步渲染的屏幕（存档屏、模组屏要读 IndexedDB）必须先 await 再量。
+// ⚠️ 靠 setTimeout 轮询是**等不到**的：体检跑在 --virtual-time-budget 下，
+// 3 秒虚拟时间只对应几毫秒真实时间，而 IDB 读的是真实时钟。
+// 所以直接 await 屏幕自己的 render()（它返回 promise）。
+{
+  const current = app.router.current;
+  const screen = app.screens?.[current];
+
+  if (typeof screen?.render === 'function') {
+    try {
+      await screen.render();
+    } catch (error) {
+      problems.push(`屏幕 ${current} 的 render 抛错，量测不可信：${String(error?.message ?? error)}`);
+    }
+  }
 }
 
 const vw = innerWidth;

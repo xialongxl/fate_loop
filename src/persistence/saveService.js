@@ -29,15 +29,25 @@ import {
   summarizeSave,
 } from './schema.js';
 import { AUTO_SAVE_SLOT } from '../core/constants.js';
+import { expOf, hasMeaningfulProgress, isSaveRegression } from '../core/runProgress.js';
 import { migrateLocalToIndexedDb, pickAdapter } from './storageAdapter.js';
 
-/** "上一局自动档"用的槽位与键（不在 SAVE_SLOT_IDS 里，所以不占存档界面的格子）。 */
+/** 自动档备份历史（不占存档界面的格子）。 */
 const PREV_SLOT = 'autoPrev';
-const PREV_KEY = slotKey(PREV_SLOT);
+const PREV_KEY = slotKey(PREV_SLOT); // 旧版单槽，只用于**迁移**
+const BACKUP_KEY = 'run:autoBackups';
+export const AUTO_BACKUP_LIMIT = 5;
 
 export class SaveService {
   #adapter = null;
   #degraded = false;
+  /**
+   * 最后一次写入的自动档（内存副本）。
+   * 安全网靠它做同步比较；init 时从盘上读一次，所以刷新页面也拦得住。
+   */
+  #lastAuto = null;
+  /** 自动档备份历史（内存常驻，落盘走 enqueue；新的在前，上限 AUTO_BACKUP_LIMIT） */
+  #backups = [];
   #pending = new Map();
   #flushScheduled = false;
   #flushing = null;
@@ -71,6 +81,33 @@ export class SaveService {
       } catch {
         // 搬家失败不影响游戏：数据仍在 localStorage，下次启动再试
       }
+    }
+
+    // 备份历史读进内存（并吸收旧版单槽 run:autoPrev，别让已经救过档的人被降级）
+    try {
+      const storedBackups = await adapter.get(BACKUP_KEY);
+      const legacy = await adapter.get(PREV_KEY);
+      const merged = Array.isArray(storedBackups) ? [...storedBackups] : [];
+      if (legacy !== null && legacy !== undefined && legacy.data !== undefined) {
+        if (!merged.some((item) => (item?.savedAt ?? null) === (legacy.savedAt ?? null))) {
+          merged.push({ ...legacy, slotId: PREV_SLOT });
+        }
+        await adapter.delete(PREV_KEY);
+      }
+      this.#backups = merged
+        .filter((item) => item !== null && item !== undefined && item.data !== undefined)
+        .sort((a, b) => Number(b.savedAt ?? 0) - Number(a.savedAt ?? 0))
+        .slice(0, AUTO_BACKUP_LIMIT);
+    } catch {
+      this.#backups = [];
+    }
+
+    // 把现有自动档读进内存：安全网必须跨页面刷新仍然有效，
+    // 否则“刷新页面 → 读个旧档 → 自动保存”这条路径上就没人拦得住了。
+    try {
+      this.#lastAuto = (await adapter.get(slotKey(AUTO_SAVE_SLOT))) ?? null;
+    } catch {
+      this.#lastAuto = null;
     }
 
     return { kind: adapter.kind, degraded, attempts, migrated };
@@ -122,9 +159,32 @@ export class SaveService {
     return this;
   }
 
-  /** 写入自动槽（每层开始、每次结算时由 GameFlow 调用）。 */
+  /**
+   * 写入自动槽（每层开始、每次结算时由 GameFlow 调用）。
+   *
+   * ⚠️ 这里有一道**丢档安全网**：如果新状态比当前自动档更"旧"（exp 变小），
+   * 说明这次写入会把一局进度更大的存档顶掉 —— 先把被顶掉的那份存进备份历史。
+   * 典型现场：误点「新的轮回」后在新局里打了第一仗。
+   *
+   * 为什么不用 hasMeaningfulProgress 拦：新局只要往下走一层就已经"有进度"了，
+   * **任何**门控都挡不住"新局顶掉老局"。自动槽就该跟着当前局走，
+   * 安全性得由"顶掉前先存一份"来保证。
+   *
+   * 为什么用内存里的 #lastAuto 而不是再读一次盘：saveRun 是同步入队、
+   * 宏任务落盘，比较一旦走异步就会和 flush 抢时序 —— 读到新值就等于没读到。
+   */
   saveRun(state) {
-    return this.saveToSlot(AUTO_SAVE_SLOT, state);
+    const serialized = serializeRun(state);
+    const previous = this.#pending.get(slotKey(AUTO_SAVE_SLOT)) ?? this.#lastAuto;
+    if (
+      previous !== null &&
+      previous !== undefined &&
+      isSaveRegression(previous.data ?? previous, serialized)
+    ) {
+      this.#backupRecord(previous);
+    }
+    this.#lastAuto = { slotId: AUTO_SAVE_SLOT, savedAt: Date.now(), ...this.#credentials(), data: serialized };
+    return this.enqueue(slotKey(AUTO_SAVE_SLOT), this.#lastAuto);
   }
 
   /**
@@ -218,38 +278,120 @@ export class SaveService {
   }
 
   /**
-   * 把当前自动槽备份到"上一局"槽。
+   * 备份的**内容身份**。
    *
-   * 为什么需要：GameFlow 已经不会用"没有进度的新局"覆盖自动档了，但玩家一旦
-   * 在新局打出进度，上一局的自动档就被覆盖 —— 那一局就此找不回来。开新局的
-   * 那一刻先存一份，主菜单就能给出「回上一局」。
+   * ⚠️ 不能用 savedAt 去重：两次写入落在同一毫秒是完全正常的（连点、批量结算、
+   * 测试里更是必然），那会把两份**不同**的档误判成重复而丢掉一份 —— 而"丢掉的那份"
+   * 恰恰是玩家要救的。savedAt 同样也不能当删除键（一次删掉两条）。
    */
-  async backupAutoSave() {
-    if (this.#adapter === null) await this.init();
-    const record = this.#pending.get(slotKey(AUTO_SAVE_SLOT)) ?? (await this.#adapter.get(slotKey(AUTO_SAVE_SLOT)));
-    if (record === null || record === undefined) return { ok: false, reason: 'noAutoSave' };
-    await this.#adapter.set(PREV_KEY, { ...record, slotId: PREV_SLOT, backedUpAt: record.savedAt ?? null });
-    this.#pending.delete(PREV_KEY);
-    return { ok: true };
+  static #backupKeyOf(record) {
+    const d = record?.data ?? record ?? {};
+    return [
+      d.seed ?? '?',
+      expOf(d),
+      d.metadata?.floorsCleared ?? 0,
+      d.fateShards ?? 0,
+      d.metadata?.battlesWon ?? 0,
+    ].join('|');
   }
 
-  /** 读"上一局"备份。没有则 null。 */
+  /**
+   * 把一份现成的自动档记录收进备份历史。
+   *
+   * **全程同步**（除了走既有写队列落盘）：以前这里是"异步读盘 + 调用方 void 掉
+   * promise"，于是 flush() 不等它，测试与真实退出时序下备份会丢。
+   * 列表常驻 #backups，落盘统一走 enqueue ⇒ 与存档槽同一套 flush 语义。
+   */
+  #backupRecord(record) {
+    const data = record?.data ?? record;
+    let run;
+    try {
+      run = deserializeRun(data);
+    } catch {
+      return false;
+    }
+    if (!hasMeaningfulProgress(run)) return false;
+    const backupKey = SaveService.#backupKeyOf(record);
+    if (this.#backups.some((item) => item.backupKey === backupKey)) return false;
+    this.#backups = [
+      { ...record, slotId: PREV_SLOT, backupKey },
+      ...this.#backups,
+    ]
+      .filter((item) => item !== null && item !== undefined && item.data !== undefined)
+      .sort((a, b) => Number(b.savedAt ?? 0) - Number(a.savedAt ?? 0))
+      .slice(0, AUTO_BACKUP_LIMIT);
+    this.enqueue(BACKUP_KEY, this.#backups);
+    return true;
+  }
+
+  /**
+   * 把当前自动槽显式收进备份历史。GameFlow 开新局前会调一次；
+   * 平时由 saveRun 里的回退安全网自动触发，不依赖这里。
+   */
+  backupAutoSave() {
+    const record =
+      this.#pending.get(slotKey(AUTO_SAVE_SLOT)) ?? this.#lastAuto ?? null;
+    if (record === null) return { ok: false, reason: 'noAutoSave' };
+    return this.#backupRecord(record) ? { ok: true } : { ok: false, reason: 'notWorthBackingUp' };
+  }
+
+  /** 备份列表（新的在前）。纯内存读，所以调用方拿到的永远与已入队写入一致。 */
+  async listAutoBackups() {
+    if (this.#adapter === null) await this.init();
+    return this.#backups.map((item) => ({ ...item }));
+  }
+
+  /**
+   * 可读的备份列表（主菜单/选择面板用）。
+   * 反序列化失败的条目**静默剔除**而不是抛：存储被清一半时把菜单带崩是最坏的结果。
+   */
+  async listPrevAutos() {
+    const list = await this.listAutoBackups();
+    const out = [];
+    for (const item of list) {
+      const view = this.#toPrevView(item);
+      if (view !== null) out.push(view);
+    }
+    return out;
+  }
+
+  /** 最近一份备份（旧 API，主菜单默认入口用）。没有则 null。 */
   async loadPrevAuto() {
-    if (this.#adapter === null) await this.init();
-    const record = await this.#adapter.get(PREV_KEY);
-    if (record === null || record === undefined) return null;
-    return {
-      savedAt: record.savedAt ?? null,
-      contentHash: record.contentHash ?? null,
-      contentMods: record.contentMods ?? [],
-      run: deserializeRun(record.data ?? record),
-    };
+    const [newest] = await this.listPrevAutos();
+    return newest ?? null;
   }
 
-  async deletePrevAuto() {
-    if (this.#adapter === null) await this.init();
-    this.#pending.delete(PREV_KEY);
-    await this.#adapter.delete(PREV_KEY);
+  #toPrevView(record) {
+    try {
+      return {
+        savedAt: record.savedAt ?? null,
+        backupKey: record.backupKey ?? record.savedAt ?? null,
+        contentHash: record.contentHash ?? null,
+        contentMods: record.contentMods ?? [],
+        run: deserializeRun(record.data ?? record),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 取走并删除某一份备份。优先按 backupKey 认（内容身份，唯一）；
+   * 只有老数据没有 backupKey 时才退回 savedAt。
+   */
+  consumeAutoBackup(id) {
+    const before = this.#backups.length;
+    this.#backups = this.#backups.filter((item) =>
+      item.backupKey !== undefined ? item.backupKey !== id : (item.savedAt ?? null) !== id,
+    );
+    this.enqueue(BACKUP_KEY, this.#backups);
+    return this.#backups.length !== before;
+  }
+
+  /** 丢掉最新一份（旧 API，保留给"用掉即弃"的调用点）。 */
+  deletePrevAuto() {
+    this.#backups = this.#backups.slice(1);
+    this.enqueue(BACKUP_KEY, this.#backups);
   }
 
   /**
@@ -261,11 +403,15 @@ export class SaveService {
     if (this.#adapter === null) await this.init();
     this.#pending.clear();
     this.#flushScheduled = false;
+    // 内存里也清：否则 clearAll 之后 listPrevAutos 还能读到"刚被清空"的备份
+    this.#backups = [];
+    this.#lastAuto = null;
     for (const slotId of SAVE_SLOT_IDS) {
       await this.#adapter.delete(slotKey(slotId));
     }
     await this.#adapter.delete(HISTORY_KEY);
     await this.#adapter.delete(PREV_KEY);
+    await this.#adapter.delete(BACKUP_KEY);
     await this.#adapter.delete(SETTINGS_KEY);
     await this.#adapter.delete(LEGACY_SAVE_KEY);
     return { ok: true };

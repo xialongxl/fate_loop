@@ -22,6 +22,7 @@ import { revealAround, revealInitial } from './map/reveal.js';
 import { encounterStream } from './prng.js';
 import { battleExpReward, buildUnlockTable, isSkillUnlocked, levelFromTotalExp } from './progression.js';
 import { addPermanentBonus, recalcPlayer, permanentBonusOf } from './derived.js';
+import { hasMeaningfulProgress } from './runProgress.js';
 import { createEmptyEquipment, enhanceGear, salvageValue } from './equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from './loot.js';
 import { pushLog } from '../contracts/defaults/log.js';
@@ -60,24 +61,11 @@ export class GameFlow {
    * 而自动槽正是「继续游戏」唯一的入口。用状态本身推导（而不是一个布尔标记），
    * 是因为标记会和 store.replace / restoreRun 的时序脱节，推导不会。
    *
-   * 注意"只在起点附近走来走去"不算进度：那部分丢了不心疼，误点开局毁档很疼。
+   * 判定本身抽到 core/runProgress.js —— 因为 SaveService 备份旧档时要用
+   * **同一个**标准。两边不一致过一次，代价是玩家丢档。
    */
   #hasProgress(state) {
-    const m = state.metadata;
-    return (
-      state.floorNumber > 1 ||
-      state.fateShards > 0 ||
-      (m.battlesWon ?? 0) > 0 ||
-      (m.expEarned ?? 0) > 0 ||
-      (m.shardsEarned ?? 0) > 0 ||
-      (m.gearFound ?? 0) > 0 ||
-      (m.floorsCleared ?? 0) > 0 ||
-      (state.player.exp ?? 0) > 0 ||
-      (state.player.inventory?.length ?? 0) > 0 ||
-      Object.values(state.player.equipment ?? {}).some((g) => g !== null && g !== undefined) ||
-      state.clearedNodeIds.size > 0 ||
-      state.shopStates.size > 0
-    );
+    return hasMeaningfulProgress(state);
   }
 
   /** 写自动槽；没有值得存的进度时什么都不做（见 #hasProgress）。 */

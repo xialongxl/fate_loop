@@ -677,11 +677,21 @@ describe('IndexedDB 版本自愈不能反过来锁死自己', () => {
 });
 
 describe('上一局自动档备份（误点开局的后悔药）', () => {
+  /** 攒一点真进度：备份历史**只收有进度的档**，空局收进去会把要救的顶出去。 */
+  function withProgress(store) {
+    store.update((d) => {
+      d.player.exp = 1200;
+      d.fateShards = 30;
+      d.metadata.battlesWon = 3;
+    });
+  }
+
   it('backupAutoSave 把自动档复制走，原档不动', async () => {
     const service = new SaveService();
     await service.init();
     const { store, flow } = await createHarness({ seed: 88 });
     flow.enterFloor(1);
+    withProgress(store);
     service.saveRun(store.unsafeGetState());
     await service.flush();
 
@@ -693,6 +703,20 @@ describe('上一局自动档备份（误点开局的后悔药）', () => {
     // 备份不出现在存档列表里（它不是第四个格子）
     const slots = await service.listSlots();
     expect(slots.map((s) => s.slotId)).not.toContain('autoPrev');
+  });
+
+  it('空局不进备份历史（否则一串空档会把真正要救的那份顶出窗口）', async () => {
+    const service = new SaveService();
+    await service.init();
+    const { store, flow } = await createHarness({ seed: 303 });
+    flow.enterFloor(1);
+    service.saveRun(store.unsafeGetState());
+    await service.flush();
+    // 分层要写清：SaveService.saveRun **无条件写**（该不该写由 GameFlow 判断），
+    // 所以槽里是有档的；是"备份"这一层自己拒绝无进度的档。
+    expect(await service.loadSlot('auto')).not.toBeNull();
+    expect(service.backupAutoSave()).toEqual({ ok: false, reason: 'notWorthBackingUp' });
+    expect(await service.listPrevAutos()).toHaveLength(0);
   });
 
   it('没有自动档时备份是安全的空操作', async () => {
@@ -707,6 +731,7 @@ describe('上一局自动档备份（误点开局的后悔药）', () => {
     await service.init();
     const { store, flow } = await createHarness({ seed: 121 });
     flow.enterFloor(1);
+    withProgress(store);
     service.saveRun(store.unsafeGetState());
     await service.flush();
     await service.backupAutoSave();

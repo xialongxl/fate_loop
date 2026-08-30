@@ -71,6 +71,22 @@ function must(selector) {
 async function tick(times = 16) {
   for (let i = 0; i < times; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+/**
+ * 等 toast 真的出现。**不要用固定 tick 数等 IndexedDB**：
+ * 存档读写走真实异步 I/O，固定次数是撞运气 —— 本文件里
+ * “导出全部”那条就这样假失败过（加一行 console.log 就绿）。
+ */
+async function waitForToast(pattern, rounds = 20) {
+  for (let i = 0; i < rounds; i += 1) {
+    await tick();
+    const toast = q('.app-toast');
+    if (toast !== null && !toast.hidden && pattern.test(toast.textContent)) return toast;
+  }
+  throw new Error(
+    `等不到匹配 ${String(pattern)} 的提示，当前：${JSON.stringify(q('.app-toast')?.textContent ?? '')}`,
+  );
+}
 const screenEl = (id) => `.screen-host [data-screen="${id}"]`;
 const visibleScreen = () => qa('[data-screen]').find((el) => !el.hidden)?.dataset.screen ?? null;
 
@@ -1307,11 +1323,12 @@ describe('存档导出导入界面', () => {
 
   it('导出全部在没有任何存档时给出提示', async () => {
     await tick();
-    const fresh = await mount({ clearStorage: false });
+    // 必须真清存储：上一测试 descend() 会留下自动档，用 clearStorage:false
+    // 等于测"恰好没落盘的时序"，之前通过纯属侥幸
+    const fresh = await mount({ clearStorage: true });
     fresh.router.go(SCREEN.SAVES);
     await tick();
     click(must(`${screenEl(SCREEN.SAVES)} [data-act="export-all"]`));
-    await tick(3);
-    expect(q('.app-toast').textContent).toMatch(/导出|没有任何存档/);
+    await waitForToast(/导出|没有任何存档/);
   });
 });

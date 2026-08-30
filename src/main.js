@@ -32,7 +32,8 @@ import { BattleEngine } from './core/battle/engine.js';
 import { GameFlow } from './core/game.js';
 import { SKILL_FAMILY_LABELS } from './core/constants.js';
 import { describeGear, rarityOf } from './core/equipment.js';
-import { SaveService } from './persistence/saveService.js';
+import { SaveService, AUTO_BACKUP_LIMIT } from './persistence/saveService.js';
+import { levelFromTotalExp } from './core/progression.js';
 import { SAVE_SLOT_IDS, slotLabel } from './persistence/schema.js';
 import {
   buildExport,
@@ -48,7 +49,7 @@ import { nullAudio } from './ui/audio/nullAudio.js';
 import { buildShell, IN_RUN_SCREENS } from './ui/shell.js';
 import { ScreenRouter } from './ui/router.js';
 import { createDialog } from './ui/dialog.js';
-import { createConfirm, createToast, escapeHtml, formatNumber } from './ui/format.js';
+import { createConfirm, createToast, escapeHtml, formatNumber, formatTimestamp } from './ui/format.js';
 import { createMainMenuScreen } from './ui/screens/mainMenu.js';
 import { createMapScreen } from './ui/screens/mapScreen.js';
 import { createBattleScreen } from './ui/screens/battleScreen.js';
@@ -405,13 +406,16 @@ export async function createApp({
       onContinue: () => void continueRun(),
       onContinuePrev: () => void continuePrevRun(),
       getPrevSlot: async () => {
-        const prev = await saveService.loadPrevAuto();
-        if (prev === null) return null;
+        const list = await saveService.listPrevAutos();
+        const prev = list[0];
+        if (prev === undefined) return null;
         return {
           empty: false,
           floorNumber: prev.run?.floorNumber,
           exp: prev.run?.exp,
           savedAt: prev.savedAt,
+          /** 多于一份时菜单上要说清“下面还有旧的”，不然玩家以为只能回一步 */
+          backupCount: list.length,
         };
       },
       onNewGame: () => openNewGameDialog(),
@@ -923,7 +927,8 @@ export async function createApp({
     dialog.close();
     speed = SPEED_MODES.PAUSED;
     // 后悔药：新局一旦产生进度就会顶掉自动档，所以此刻先备份一份
-    void saveService.backupAutoSave();
+    // 同步：备份只是改内存列表 + 入写队列（真正的落盘由 flush 统一做）
+    saveService.backupAutoSave();
     store.replace(freshState(nextSeed));
     latest = store.getSnapshot();
     flow.enterFloor(1);
@@ -1166,15 +1171,58 @@ export async function createApp({
   }
 
   async function continuePrevRun() {
-    const prev = await saveService.loadPrevAuto();
-    if (prev === null) {
+    const list = await saveService.listPrevAutos();
+    if (list.length === 0) {
       notify('没有可回退的上一局存档', 'warn');
       return;
     }
-    if (!(await confirmContentMismatch(prev))) return;
-    restoreRun(prev.run);
-    await saveService.deletePrevAuto();
-    notify('已回退到上一局的自动存档', 'info');
+    // 多于一份时必须让人选：默认拿最新的，而玩家想救的往往是“上一个之前的那一局”
+    const chosen = list.length === 1 ? list[0] : await pickPrevAuto(list);
+    if (chosen === null) return;
+    if (!(await confirmContentMismatch(chosen))) return;
+    restoreRun(chosen.run);
+    await saveService.consumeAutoBackup(chosen.backupKey ?? chosen.savedAt);
+    notify('已回退到所选的那一局自动存档', 'info');
+  }
+
+  /** 备份选择面板：时间 + 当时进度，让玩家认得出哪份是我要救的。 */
+  async function pickPrevAuto(list) {
+    return new Promise((resolve) => {
+      const rows = list.map((item) => {
+        const run = item.run ?? {};
+        return `
+          <li class="shop-item">
+            <button type="button" class="shop-item-pick" data-prev="${escapeHtml(String(item.backupKey ?? item.savedAt ?? ''))}">
+              <span class="shop-item-info">
+                <span class="shop-item-name">${escapeHtml(formatTimestamp(item.savedAt))}</span>
+                <span class="shop-item-desc">
+                  第 ${run.floorNumber ?? '?'} 层 · Lv.${levelFromTotalExp(run.exp ?? 0)} ·
+                  碎片 ${formatNumber(run.fateShards ?? 0)} · 胜场 ${run.metadata?.battlesWon ?? 0}
+                </span>
+              </span>
+            </button>
+          </li>`;
+      });
+      const box = dialog.open(`
+        <h2 tabindex="-1">回到哪一局？</h2>
+        <p class="dialog-text">系统里留着 <strong>${list.length}</strong> 份自动存档备份（最多留 ${AUTO_BACKUP_LIMIT} 份）。</p>
+        <ul class="shop-list">${rows.join('')}</ul>
+        <div class="dialog-actions">
+          <button type="button" data-act="prev-cancel" class="btn-ghost">取消</button>
+        </div>
+      `);
+      box.addEventListener('click', (event) => {
+        if (event.target.closest?.('[data-act="prev-cancel"]') !== null) {
+          dialog.close();
+          resolve(null);
+          return;
+        }
+        const key = event.target.closest?.('[data-prev]')?.getAttribute('data-prev');
+        if (key === undefined || key === null) return;
+        dialog.close();
+        resolve(list.find((item) => String(item.backupKey ?? item.savedAt ?? '') === key) ?? null);
+      });
+    });
   }
 
   /**

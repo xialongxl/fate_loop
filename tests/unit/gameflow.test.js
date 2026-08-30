@@ -1442,22 +1442,43 @@ describe('读档不得毁掉自动存档', () => {
     expect(after.run.equipment).toEqual(before.run.equipment);
   });
 
-  it('enterFloor 默认仍写自动档（下层/开局照常存档）', async () => {
+  it('enterFloor 默认仍写自动档（下层照常存档）', async () => {
     const { SaveService } = await import('../../src/persistence/saveService.js');
     const saves = new SaveService();
     await saves.init();
     const h = await boot({ saveService: saves });
+    // 必须先攒**真实进度**：门控就是"没进度不写"，用空局测这条会测到个空档。
+    // （以前这里没攒进度，断言读到的是**上一条测试留下的档** —— 巧合而绿。）
+    await runWithProgress(h);
     await saves.flush();
     const first = await saves.loadSlot('auto');
-    expect(first.run.floorNumber).toBe(1);
+    expect(first, '有进度的局应当写自动档').not.toBeNull();
+    const floorBefore = first.run.floorNumber;
 
+    h.flow.enterFloor(floorBefore + 1);
+    await saves.flush();
+    expect((await saves.loadSlot('auto')).run.floorNumber).toBe(floorBefore + 1);
+
+    h.flow.enterFloor(floorBefore + 2, { save: false });
+    await saves.flush();
+    expect((await saves.loadSlot('auto')).run.floorNumber).toBe(floorBefore + 1); // 显式不写就不写
+  });
+
+  it('空局（没打过仗没拿过东西）不写自动档 —— 门控存在的唯一理由', async () => {
+    const { SaveService } = await import('../../src/persistence/saveService.js');
+    const { resetAdapterCache, pickAdapter } = await import('../../src/persistence/storageAdapter.js');
+    resetAdapterCache();
+    const { adapter } = await pickAdapter({ modded: false });
+    await adapter.clear();
+    const saves = new SaveService();
+    await saves.init();
+    const h = await boot({ saveService: saves });
+    await saves.flush();
+    expect(await saves.loadSlot('auto')).toBeNull();
+    // 走到第 2 层也不算（旧逻辑的 floorNumber>1 就是在这里毁档的）
     h.flow.enterFloor(2);
     await saves.flush();
-    expect((await saves.loadSlot('auto')).run.floorNumber).toBe(2);
-
-    h.flow.enterFloor(3, { save: false });
-    await saves.flush();
-    expect((await saves.loadSlot('auto')).run.floorNumber).toBe(2); // 显式不写就不写
+    expect(await saves.loadSlot('auto')).toBeNull();
   });
 });
 

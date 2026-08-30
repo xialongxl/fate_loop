@@ -118,7 +118,9 @@ export function createMainMenuScreen({
         <strong>回上一局自动档</strong>
         <small>第 ${slot.floorNumber ?? '?'} 层 · Lv.${levelFromTotalExp(slot.exp ?? 0)} · ${escapeHtml(
           formatTimestamp(slot.savedAt),
-        )} 时被新局顶掉</small>
+        )} 时被新局顶掉${
+          (slot.backupCount ?? 1) > 1 ? ` · 共 ${slot.backupCount} 份可选` : ''
+        }</small>
       </span>`;
     prevSlot.append(button);
     prevSlot.hidden = false;

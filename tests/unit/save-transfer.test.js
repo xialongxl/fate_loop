@@ -115,7 +115,13 @@ describe('往返', () => {
     const service = new SaveService();
     await service.init();
     service.provideFingerprint(() => ({ hash: '1234abcd', mods: [], packs: [] }));
-    const { flow } = await createHarness({ seed: 777, saveService: service });
+    const { store, flow } = await createHarness({ seed: 777, saveService: service });
+    // 攒点真进度再存：自动槽的门控是"没发生过事情就不写"（防误点开局毁档），
+    // 空局 enterFloor(2) 现在**不会**落盘 —— 那是特性不是 bug。
+    store.update((d) => {
+      d.player.exp = 500;
+      d.metadata.floorsCleared = 1;
+    });
     flow.enterFloor(2);
     await service.flush();
 

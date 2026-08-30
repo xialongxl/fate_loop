@@ -2469,6 +2469,25 @@ code {
    styles.css 里有规则"这条扫描扫出。排版悄悄塌掉比报错更难发现，
    所以宁可补在这里也不要留空。 */
 
+/* 备份选择面板里整行可点的按钮（复用 shop-item 的排版，只去掉按钮外壳） */
+.shop-item-pick {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shop-item-pick:hover .shop-item-name {
+  color: var(--accent);
+}
+
 .reward-chip.is-loot {
   border-color: var(--accent);
   color: #cfe0ff;

@@ -83,6 +83,8 @@ export default [
         // 沙箱加载器要把包内容喂给 WebCrypto 算 hash（TextEncoder）；
         // 以及宿主注入的时钟/告警回调可能来自这些宿主对象。
         TextEncoder: 'readonly',
+        TextDecoder: 'readonly',
+        queueMicrotask: 'readonly',
         URL: 'readonly',
       },
     },

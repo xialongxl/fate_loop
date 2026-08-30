@@ -32,9 +32,9 @@ export function createModsScreen({
 
     <div class="transfer-bar">
       <label class="visually-hidden" for="mod-install-file">选择包文件</label>
-      <input id="mod-install-file" type="file" accept=".js,text/javascript,application/javascript" data-slot="file" hidden />
+      <input id="mod-install-file" type="file" accept=".js,.zip,text/javascript,application/javascript" data-slot="file" hidden />
       <button type="button" class="btn-ghost" data-act="install">安装本地包…</button>
-      <span class="transfer-hint" data-slot="hint">支持单个 .js 包文件；多文件包请压成 zip（尚未开放）</span>
+      <span class="transfer-hint" data-slot="hint">支持单个 .js 文件，或多文件包压成 .zip（入口 main.js，可带 pack.json）</span>
     </div>
 
     <p class="screen-hint">

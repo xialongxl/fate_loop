@@ -1041,25 +1041,55 @@ export async function createApp({
    *  3. 装完不热重载，只标脏（理由见 screens/mods.js 顶部）。
    */
   async function installPackFile(file) {
-    let text = '';
-    try {
-      text = await readTextFile(file);
-    } catch (error) {
-      notify(`读取文件失败：${String(error?.message ?? error)}`, 'warn');
-      return;
+    const fileName = String(file?.name ?? 'pack.js');
+    const identity = derivePackIdentity(fileName);
+    /** 一个文件 = 一个单文件包；zip = 多文件包。两条路都归到同一个 files Map */
+    let files = null;
+    let entry = undefined;
+    let meta = {};
+
+    if (/\.zip$/i.test(fileName)) {
+      let bytes;
+      try {
+        bytes = new Uint8Array(await (file.arrayBuffer?.() ?? Promise.reject(new Error('没有 arrayBuffer'))));
+      } catch (error) {
+        notify(`读取压缩包失败：${String(error?.message ?? error)}`, 'warn');
+        return;
+      }
+      // 只有真拿 zip 来才拉 fflate：单文件路径不该背解压库
+      const { unpackArchive } = await import('./core/mods/sandbox/archive.js');
+      const unpacked = await unpackArchive(bytes);
+      if (!unpacked.ok) {
+        notify(`解包失败：${unpacked.reason}`, 'warn');
+        return;
+      }
+      files = unpacked.files;
+      entry = unpacked.entry;
+      meta = unpacked.meta ?? {};
+    } else {
+      let text = '';
+      try {
+        text = await readTextFile(file);
+      } catch (error) {
+        notify(`读取文件失败：${String(error?.message ?? error)}`, 'warn');
+        return;
+      }
+      files = { 'main.js': text };
     }
-    const identity = derivePackIdentity(file.name ?? 'pack.js');
+
+    // pack.json 里写了 id/version 就用它，否则从文件名推 —— 两种都要展示给玩家
+    const id = typeof meta.id === 'string' && meta.id !== '' ? meta.id : identity.id;
+    const version = typeof meta.version === 'string' && meta.version !== '' ? meta.version : identity.version;
+    const title = String(meta.title ?? file?.name ?? id);
+
     const sure = await confirm(
-      `安装为 ${identity.id}（版本 ${identity.version}），来源文件"${String(file.name ?? '')}"。\n` +
+      `安装为 ${id}（版本 ${version}），来源"${fileName}"，含 ${files.size ?? Object.keys(files).length} 个文件。
+` +
         '第三方包会改变内容指纹，并把存档切到独立命名空间。',
       { confirmLabel: '安装' },
     );
     if (!sure) return;
-    const result = await packService.install({
-      ...identity,
-      title: String(file.name ?? identity.id),
-      files: { 'main.js': text },
-    });
+    const result = await packService.install({ id, version, title, author: meta.author, files, entry });
     if (!result.ok) {
       notify(`安装失败：${result.reason}`, 'warn');
       return;

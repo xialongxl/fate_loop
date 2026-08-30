@@ -243,3 +243,61 @@ describe('模组屏（S3）', () => {
     app.destroy();
   });
 });
+
+describe('zip 包安装（S2b-4）', () => {
+  const flush = async (n = 6) => {
+    for (let i = 0; i < n; i += 1) await new Promise((r) => setTimeout(r, 0));
+  };
+
+  it('拖一个 .zip 进来：多文件包解开后正常安装', async () => {
+    const { zipSync, strToU8 } = await import('fflate');
+    const packs = await new PackService().init();
+    const app = await boot(packs);
+    app.router.go(SCREEN.MODS);
+    await flush(3);
+
+    const input = app.screens[SCREEN.MODS].element.querySelector('[data-slot="file"]');
+    const bytes = zipSync({
+      'main.js': strToU8(PACK.files['main.js']),
+      'lib/extra.js': strToU8('export const EXTRA = 1;'),
+    });
+    // jsdom 的 File 没有 arrayBuffer/text，所以给一个最小替身：
+    // 生产代码两条路径都有（file.arrayBuffer?.()），这里测的是 zip 分支
+    const stub = { name: 'poc.zip@1.2.3.zip', arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+    Object.defineProperty(input, 'files', { value: [stub], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    await flush();
+
+    const box = document.querySelector('.dialog-box');
+    expect(box, 'zip 安装也要过确认弹层').not.toBeNull();
+    expect(box.textContent).toContain('poc.zip');
+    expect(box.textContent).toContain('2 个文件');
+    box.querySelector('[data-confirm]').click();
+    await flush();
+
+    const rows = await packs.list();
+    expect(rows[0]).toMatchObject({ id: 'poc.zip', version: '1.2.3', files: 2 });
+    app.destroy();
+  });
+
+  it('炸弹包给出可读原因，不静默失败也不崩', async () => {
+    const { zipSync, strToU8 } = await import('fflate');
+    const packs = await new PackService().init();
+    const app = await boot(packs);
+    app.router.go(SCREEN.MODS);
+    await flush(3);
+    const input = app.screens[SCREEN.MODS].element.querySelector('[data-slot="file"]');
+    const huge = strToU8('A'.repeat(600 * 1024));
+    const bytes = zipSync({ 'main.js': strToU8(PACK.files['main.js']), 'big.js': huge });
+    const stub = { name: 'poc.bomb.zip', arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+    Object.defineProperty(input, 'files', { value: [stub], configurable: true });
+    input.dispatchEvent(new Event('change'));
+    await flush();
+
+    const toast = document.querySelector('.app-toast');
+    expect(toast.hidden).toBe(false);
+    expect(toast.textContent).toMatch(/解包失败|解压后超过/);
+    expect(await packs.list()).toHaveLength(0);
+    app.destroy();
+  });
+});

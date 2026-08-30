@@ -1315,10 +1315,9 @@ describe('存档导出导入界面', () => {
     expect(buttons[0].getAttribute('data-export')).toBe(AUTO_SAVE_SLOT);
 
     click(buttons[0]);
-    await tick(3);
-    const toast = q('.app-toast');
+    // 同样等 toast 出现，而不是固定 tick —— 导出前要先读盘
+    const toast = await waitForToast(/已导出|不支持下载/);
     expect(toast.hidden).toBe(false);
-    expect(toast.textContent).toMatch(/已导出|不支持下载/);
   });
 
   it('导出全部在没有任何存档时给出提示', async () => {

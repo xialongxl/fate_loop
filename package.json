@@ -16,6 +16,7 @@
     "mod:poc": "node tools/mod-sandbox-poc.mjs"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "howler": "2.2.4"
   },
   "devDependencies": {

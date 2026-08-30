@@ -1,6 +1,17 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  /**
+   * 相对路径产物 —— GitHub Pages **项目页**（`用户.github.io/仓库名/`）的硬要求。
+   *
+   * 不写这行时产物引用 `/assets/xxx.js`，部署到子路径后浏览器会去站点根目录要
+   * 文件 ⇒ 全部 404 ⇒ 打开就是白屏（而且控制台之外没有任何提示）。
+   * 用 './' 而不是 '/fate_loop/'：项目页、用户页根目录、本地起静态服务器
+   * 三种情形都能跑，不需要知道最终仓库名。
+   *
+   * 回归手段：`npm run deploy:check` 把 dist 挂到子路径下逐个资源请求验 200。
+   */
+  base: './',
   // 不要在此用 optimizeDeps.exclude 排除 src/mods：
   // 该选项只接受裸模块标识符（npm 包名），对项目自有源码路径无效；
   // 且它最终透传给 esbuild 的 external，而 external 路径不允许出现两个 *

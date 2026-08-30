@@ -28,6 +28,37 @@ npm run verify     # lint + test + build 串联（提交前的门）
 没有后端、没有构建产物依赖、没有账号：`npm run build` 出来的 `dist/` 是纯静态站，
 丢到任意静态托管即可玩。
 
+## 部署到 GitHub Pages
+
+仓库里已带了 `.github/workflows/deploy.yml`：**push 到 master 就自动构建并发布**。
+第一次需要做三件事（都是仓库设置，不是代码）：
+
+```bash
+# 1) 在 GitHub 上建一个空仓库（不要初始化 README，会和本地冲突），然后：
+git remote add origin https://github.com/<你的用户名>/<仓库名>.git
+git push -u origin master
+```
+
+**3)** 到仓库 Settings → Pages → **Build and deployment → Source: GitHub Actions**。
+不开关这一步，workflow 会显示跑成功但站点不更新 —— 这是 Pages 最常见的坑。
+
+站点地址：项目页是 `https://<用户名>.github.io/<仓库名>/`。
+
+### 为什么子路径下能跑
+
+`vite.config.js` 里写了 `base: './'`。不写的话产物引用 `/assets/xxx.js`，
+放到子路径就是**白屏 + 控制台一堆 404**，而 `vite build` 不会报任何错。
+音频目录同样跟着 base 走（`src/ui/audio/soundMap.js`）。
+
+本地就能验，不需要先推上去：
+
+```bash
+npm run deploy:check   # 把 dist 挂到 /fate_loop/ 子路径下起服务，逐个请求资源
+```
+
+它会在 CI 里作为发布前的一道闸门：base 配错、某处写死了 `/assets`、
+或者沙箱用的 wasm 没进产物，都会在这里红掉而不是变成线上白屏。
+
 ## 30 秒上手
 
 1. 主菜单点 **新的轮回**，输入任意种子（数字或一串词语都行，留空则随机）

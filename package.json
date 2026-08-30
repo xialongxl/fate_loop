@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "verify": "npm run lint && npm run test && npm run build",
     "ui:audit": "node tools/ui-audit/run.mjs",
-    "mod:poc": "node tools/mod-sandbox-poc.mjs"
+    "mod:poc": "node tools/mod-sandbox-poc.mjs",
+    "deploy:check": "node tools/deploy-check.mjs"
   },
   "dependencies": {
     "fflate": "^0.8.3",

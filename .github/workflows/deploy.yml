@@ -1,0 +1,69 @@
+# GitHub Pages 自动发布。
+#
+# 为什么用 Actions 而不是 gh-pages 分支 / dist 入库：
+#   - dist 入库会把构建产物混进源码历史，每次改动都多一份噪声 diff
+#   - gh-pages 分支要本地跑 gh-pages CLI，多一个容易漏做的步骤
+#   这个工作流让"push 即上线"成为唯一心智模型：你不需要记得构建任何东西。
+#
+# 仓库侧需要开一次：Settings → Pages → Build and deployment → Source: GitHub Actions。
+# 不开的话这个 workflow 会跑成功但站点不更新（这是 Pages 最常见的第二个坑）。
+name: 发布到 GitHub Pages
+
+on:
+  push:
+    branches: [master]
+  # 允许在 Actions 页面手动触发，方便确认权限配置对不对
+  workflow_dispatch:
+
+# 部署 Pages 需要写 permissions.id-token 与 pages；没有这两项 deploy 会 403
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只跑一个部署；新的 push 取消进行中的旧部署
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 版本与本地对齐（本仓库在 Node 24 上验证）
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # 用 lockfile 装依赖：CI 与本地的依赖树必须逐字节一致，
+      # 否则"本地绿、线上白屏"这种问题根本查不动
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 质量闸门（lint + 测试 + 构建）
+        run: npm run verify
+
+      # 这一步是本仓库特有的：把 dist 挂到子路径下真起一个静态服务器，
+      # 逐个请求 index.html 引用的资源。base 配错导致的白屏在这里就会红，
+      # 而不是等推上去才发现。
+      - name: 部署自检（子路径资源可达）
+        run: npm run deploy:check
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # deploy:check 刚刚重新构建过，直接用它产出的 dist
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.out.outputs.page_url }}
+    steps:
+      - id: out
+        uses: actions/deploy-pages@v4

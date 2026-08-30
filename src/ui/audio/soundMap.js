@@ -30,8 +30,16 @@ export const SOUND_IDS = Object.freeze({
  */
 export const AUDIO_ASSETS = Object.freeze({});
 
-/** 音频文件所在的静态目录（vite 会把 public/ 原样拷到产物根）。 */
-export const AUDIO_ASSET_DIR = '/audio/';
+/**
+ * 音频文件所在的静态目录。
+ *
+ * 必须跟着 `base` 走：写死 `/audio/` 在本地没事，部署到 Pages 项目页
+ * （`用户.github.io/仓库名/`）就会去站点根目录找 ⇒ 静默 404。
+ * `import.meta.env.BASE_URL` 在 dev 是 '/'，在 `base: './'` 的产物里是 './'，
+ * 两种情形拼出来的 URL 都相对当前页面解析 ⇒ 子路径下也对。
+ */
+const BASE = (import.meta.env && import.meta.env.BASE_URL) || '/';
+export const AUDIO_ASSET_DIR = `${BASE}audio/`;
 
 /**
  * 音效清单。src 为空数组表示「尚无资源」，此时 HowlerAudio 根本不会构造 Howl，

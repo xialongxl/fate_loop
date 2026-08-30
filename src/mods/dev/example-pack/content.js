@@ -5,6 +5,12 @@
  * （清单见 fate-shim.js 的 STATE_OPERATIONS）。永久属性必须走
  * ops.permanentBonus —— 直接写 state.player.maxHp 会在下一次 recalcPlayer
  * 时凭空消失（官方内容历史上就踩过，现在有守卫测试扫这种写法）。
+ *
+ * ⚠️ 第三方包还要知道一条：**这里的 state 是只读快照**。
+ * 官方模组能直接改 state（拿到的是活对象），沙箱里的包改不动 ——
+ * 快照在 VM 里是深冻的，写它会当场抛 TypeError 并把包摘掉。
+ * 这是故意的：静默无效（"我写了血药但没回血"）比报错难查一百倍。
+ * 所有效果都必须走 ops。
  */
 /** 导出数组，由 index.js 在 fate.begin() 之后统一登记（见 skills.js 的说明）。 */
 export const VOID_SHOP_ITEMS = [

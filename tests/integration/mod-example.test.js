@@ -116,6 +116,14 @@ describe('官方 + 示例模组一起加载', () => {
     expect(pool.encounters.get('enc.void.lone').maxFloor).toBe(999);
     expect(pool.shopItems.get('shop.void.core').kind).toBe('upgrade');
     expect(pool.events.get('event.void.altar').choices).toHaveLength(3);
+
+    // ── S2b 新增能力：带记忆的机制 + onBattleStart + 地图生成器 ─────────────
+    const debt = pool.skills.get('void.debt');
+    expect(debt, '示例包应演示一个带记忆的技能').toBeDefined();
+    expect(pool.mapGenerators.get('dev.example.grid'), '示例包应演示一个地图生成器').toBeDefined();
+    // 刻意不叫 official.grid：示例包不该把开发时的地图换成小路
+    expect(pool.mapGenerators.has('official.grid')).toBe(true);
+    expect(pool.mapGenerators.get('official.grid').source).not.toBe('dev.example-pack');
   });
 
   it('模组技能引用的官方 ID 通过跨引用校验（怪物混编官方 + 自有技能）', async () => {

@@ -11,7 +11,7 @@ export const REQUIRES_CORE_MONSTERS = Symbol.for('fate.provide.monsters.core');
 
 export default {
   id: 'dev.example-pack',
-  version: '1.0.0',
+  version: '1.1.0',
   type: 'content',
   provides: [PROVIDES_EXAMPLE_VOID],
   requires: [REQUIRES_CORE_MONSTERS],

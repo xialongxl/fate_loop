@@ -239,114 +239,59 @@ void secrets;
     expect(record.failureReason).toMatch(/包外模块|不存在/);
   });
 
-  it('仍未开放的能力：fate.mapGenerator 给的是明确报错而不是 undefined is not a function', async () => {
+  it('mapGenerator 已开放：generate() 走第三种跨界形状，返回数据而非副作用', async () => {
     const h = await host();
     const record = await h.installPack(
       packOf({
         'main.js': `
 import { begin, mapGenerator } from 'fate';
 begin({ id: 'poc.mapgen', version: '1.0.0' });
-mapGenerator({ id: 'official.grid', generate: () => ({ nodes: [] }) });
-`,
-      }),
-    );
-    expect(record.failed).toBe(true);
-    expect(record.failureReason).toMatch(/尚未开放/);
-  });
-
-  it('shopItem 已开放：apply(state, ops) 走 ops 通道，且能在结算之外被拒绝', async () => {
-    const h = await host();
-    const record = await h.installPack(
-      packOf({
-        'main.js': `
-import { begin, shopItem } from 'fate';
-begin({ id: 'poc.shop', version: '1.0.0' });
-shopItem({ id: 'poc.shop.potion', name: '药', cost: 10,
-  apply: (state, ops) => { if (ops.spendShards(10)) ops.healRatio(0.3); ops.addMetadata('bought', 1); } });
-`,
-      }),
-    );
-    expect(record.failed, record.failureReason ?? 'no failure').toBe(false);
-    const item = h.drainRegistrations(record).shopItems[0];
-    expect(typeof item.apply).toBe('function');
-
-    const calls = [];
-    const ops = {
-      shards: 25,
-      spendShards: (n) => { calls.push(['spendShards', n]); return true; },
-      healRatio: (r) => calls.push(['healRatio', r]),
-      addMetadata: (k, v) => calls.push(['addMetadata', k, v]),
-      permanentBonus: () => calls.push(['permanentBonus']),
-      gainShards: () => {},
-      setShards: () => {},
-      hpCostRatio: () => {},
-      fullHeal: () => {},
-    };
-    item.apply({ fateShards: 25, player: { hp: 10, maxHp: 100 } }, ops);
-    expect(calls).toEqual([['spendShards', 10], ['healRatio', 0.3], ['addMetadata', 'bought', 1]]);
-
-    // 在结算之外调 ops 必须报错（而不是安静地改到别的东西上）
-    expect(() => item.apply({ player: {} }, null)).not.toThrow();
-    expect(h.getRecord('poc.smoke').failed).toBe(true);
-    expect(h.getRecord('poc.smoke').failureReason).toMatch(/ops\.|apply/);
-  });
-
-  it('event 已开放：choices[].apply 是嵌在数组里的函数，必须逐个跨界接上', async () => {
-    const h = await host();
-    const record = await h.installPack(
-      packOf({
-        'main.js': `
-import { begin, event } from 'fate';
-begin({ id: 'poc.evt', version: '1.0.0' });
-event({ id: 'poc.evt.altar', name: '祭坛', text: '要血还是钱？',
-  choices: [
-    { label: '献血', apply: (state, ops) => { ops.hpCostRatio(0.2); ops.gainShards(30); } },
-    { label: '祈祷', apply: (state, ops) => ops.permanentBonus({ attack: 3 }) },
-  ] });
+mapGenerator({ id: 'official.grid', generate: ({ seed, floorNumber }) => {
+  // 一条三个节点的直路：a - b - c。用 seed/floorNumber 参与命名，证明参数确实过了界
+  const tag = seed + ':' + floorNumber;
+  const nodes = [
+    { id: 'a' + tag, type: 'start', x: 0, y: 0 },
+    { id: 'b' + tag, type: 'combat', x: 1, y: 0 },
+    { id: 'c' + tag, type: 'exit', x: 2, y: 0 },
+  ];
+  const adjacency = {};
+  for (const n of nodes) adjacency[n.id] = [];
+  adjacency['a' + tag].push('b' + tag);
+  adjacency['b' + tag].push('a' + tag, 'c' + tag);
+  adjacency['c' + tag].push('b' + tag);
+  return { nodes, adjacency, startNodeId: 'a' + tag, exitNodeId: 'c' + tag, gridWidth: 3, gridHeight: 1 };
+} });
 `,
       }),
     );
     expect(record.failed, record.failureReason ?? 'no failure').toBe(false);
-    const evt = h.drainRegistrations(record).events[0];
-    expect(evt.choices).toHaveLength(2);
-    expect(typeof evt.choices[0].apply).toBe('function');
-    expect(typeof evt.choices[1].apply).toBe('function');
-    // 两个选择项不能接到同一个函数上（路径记错就会这样）
-    expect(evt.choices[0].apply).not.toBe(evt.choices[1].apply);
+    const generator = h.drainRegistrations(record).mapGenerators[0];
+    expect(typeof generator.generate).toBe('function');
 
-    const calls = [];
-    const ops = {
-      shards: 0,
-      hpCostRatio: (r) => calls.push(['hpCostRatio', r]),
-      gainShards: (n) => calls.push(['gainShards', n]),
-      permanentBonus: (b) => calls.push(['permanentBonus', b]),
-      spendShards: () => false,
-      healRatio: () => {},
-      setShards: () => {},
-      fullHeal: () => {},
-      addMetadata: () => {},
-    };
-    evt.choices[0].apply({ player: { hp: 100, maxHp: 100 } }, ops);
-    expect(calls).toEqual([['hpCostRatio', 0.2], ['gainShards', 30]]);
-    calls.length = 0;
-    evt.choices[1].apply({ player: {} }, ops);
-    expect(calls).toEqual([['permanentBonus', { attack: 3 }]]);
+    const map = generator.generate({ seed: 5, floorNumber: 3 });
+    expect(map.startNodeId).toBe('a5:3');
+    expect(map.adjacency['b5:3']).toEqual(['a5:3', 'c5:3']);
+    // 跑两遍必须逐字节相同（这是抓包里偷偷用随机源的唯一手段，包代码不过 lint）
+    expect(JSON.stringify(generator.generate({ seed: 5, floorNumber: 3 }))).toBe(JSON.stringify(map));
   });
 
-  it('数组项里白名单外的函数字段也要拒（静默丢=事件选不动）', async () => {
-    const h = await host();
+  it('generate 里抛错：只摘这个包，不炸调用方', async () => {
+    const reports = [];
+    const h = await host({ onPackFailure: (id, reason) => reports.push([id, reason]) });
     const record = await h.installPack(
       packOf({
         'main.js': `
-import { begin, event } from 'fate';
-begin({ id: 'poc.stray2', version: '1.0.0' });
-event({ id: 'poc.stray2.a', name: '怪祭坛', text: 'x',
-  choices: [{ label: 'a', apply: () => {}, onPick: () => {} }] });
+import { begin, mapGenerator } from 'fate';
+begin({ id: 'poc.genfail', version: '1.0.0' });
+mapGenerator({ id: 'official.grid', generate: () => { throw new Error('生成器不想活'); } });
 `,
       }),
     );
-    expect(record.failed).toBe(true);
-    expect(record.failureReason).toMatch(/choices\[0\]\.onPick 是函数/);
+    expect(record.failed, record.failureReason ?? 'no failure').toBe(false);
+    const generator = h.drainRegistrations(record).mapGenerators[0];
+    expect(generator.generate({ seed: 1, floorNumber: 1 })).toBeUndefined();
+    expect(reports).toHaveLength(1);
+    expect(reports[0][1]).toMatch(/生成器不想活/);
   });
 
   it('白名单外的函数字段：直接拒，不静默丢（静默丢=技能看着生效其实没生效）', async () => {

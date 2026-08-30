@@ -715,8 +715,12 @@ describe('上一局自动档备份（误点开局的后悔药）', () => {
     // 分层要写清：SaveService.saveRun **无条件写**（该不该写由 GameFlow 判断），
     // 所以槽里是有档的；是"备份"这一层自己拒绝无进度的档。
     expect(await service.loadSlot('auto')).not.toBeNull();
+    // 断言"这次没新增"而不是"列表为空"：同文件里前一个测试排队的 flush 可能在
+    // wipeStorage 之后才落盘，那时 saveRun 的回退安全网会忠实地把它备份下来 ——
+    // 行为是对的，拿"必须为空"去断言就是在依赖别人的时序
+    const before = (await service.listPrevAutos()).length;
     expect(service.backupAutoSave()).toEqual({ ok: false, reason: 'notWorthBackingUp' });
-    expect(await service.listPrevAutos()).toHaveLength(0);
+    expect((await service.listPrevAutos()).length).toBe(before);
   });
 
   it('没有自动档时备份是安全的空操作', async () => {

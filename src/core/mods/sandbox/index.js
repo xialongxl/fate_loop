@@ -15,6 +15,8 @@
 import { createSandboxHost } from './host.js';
 import { mergeIntoPool, validatePoolReferences, createContentPool } from '../loader.js';
 import { createPack, hashPack } from './pack.js';
+import { SANDBOX_SUPPORTED_KINDS } from './host.js';
+import { validateMapGenerator } from './generatorCheck.js';
 
 function clonePool(pool) {
   const copy = createContentPool();
@@ -71,9 +73,20 @@ export async function installSandboxPacks({ entries, pool, clock, host: existing
       mergeIntoPool(candidate, specs, pack.id);
       validatePoolReferences(candidate);
 
+      /**
+       * 地图生成器要单独跑一遍准入：地图结构坏了玩家会卡在**已存档**的一局里，
+       * 而包代码不过 lint 也不过测试 —— 装包这一刻是唯一的拦截点。
+       * 校验含确定性与结构不变量，见 generatorCheck.js。
+       */
+      for (const generator of specs.mapGenerators ?? []) {
+        validateMapGenerator(generator, { source: pack.id });
+      }
+
       const before = indexSources(pool);
       mergeIntoPool(pool, specs, pack.id);
-      const provided = { families: 0, skills: 0, buffs: 0, monsters: 0, encounters: 0 };
+      // 计数从支持清单推导 —— 手写清单在开放 shopItem/event/mapGenerator 时
+      // 就会静默漏掉三类（UI 显示"这包什么都没带"）
+      const provided = Object.fromEntries(SANDBOX_SUPPORTED_KINDS.map((kind) => [kind, 0]));
       for (const kind of Object.keys(provided)) {
         for (const spec of specs[kind] ?? []) {
           provided[kind] += 1;

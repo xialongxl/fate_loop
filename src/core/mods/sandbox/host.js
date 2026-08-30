@@ -40,6 +40,7 @@ export const SANDBOX_FUNCTION_PROPS = Object.freeze({
   families: [],
   shopItems: ['apply'],
   events: ['choices[].apply'],
+  mapGenerators: ['generate'],
 });
 
 /** `choices[].apply` → { list: 'choices', prop: 'apply' }；顶层字段返回 null。 */
@@ -54,6 +55,7 @@ export const SANDBOX_SUPPORTED_KINDS = Object.freeze([
   'encounters',
   'shopItems',
   'events',
+  'mapGenerators',
 ]);
 
 /** API 方法 → 它写进哪个内容列表。 */
@@ -69,8 +71,10 @@ const METHOD_TARGETS = Object.freeze({
   encounter: 'encounters',
   shopItem: 'shopItems',
   event: 'events',
+  mapGenerator: 'mapGenerators',
 });
-const NOT_YET_METHODS = Object.freeze(['mapGenerator']);
+/** 仍未开放的 API 方法（现在全开完了；留着这条机制以便将来加能力时明确拒绝） */
+const NOT_YET_METHODS = Object.freeze([]);
 
 const CONST_VALUES = Object.freeze({ SKILL_TYPE, SKILL_RANGE, STEP_MS, OGCD_SLOT_LIMIT, VICTORY_FLOOR });
 
@@ -130,6 +134,9 @@ globalThis.__freeze = (v) => {
 globalThis.__applyHook = (fn, ctx, stateJson) => fn(ctx, globalThis.__freeze(JSON.parse(stateJson)));
 // 商店/事件的 apply(state, ops)：state 是快照，改动只能通过 ops 走官方原语
 globalThis.__applyOp = (fn, stateJson, ops) => fn(globalThis.__freeze(JSON.parse(stateJson)), ops);
+// 地图生成器第三种形状：generate({ seed, floorNumber }) → 返回**数据**（不是副作用）。
+// 返回值会被宿主深拷贝并做结构 + 确定性校验，所以这里不冻参数以外的东西
+globalThis.__applyGen = (fn, argJson) => fn(globalThis.__freeze(JSON.parse(argJson)));
 globalThis.__ops = {
   permanentBonus: (b) => {
     globalThis.__opVal('permanentBonus', JSON.stringify(b ?? {}));
@@ -336,6 +343,7 @@ export async function createSandboxHost({
     if (record.hookFn?.alive) record.hookFn.dispose();
     if (record.opFn?.alive) record.opFn.dispose();
     if (record.opsHandle?.alive) record.opsHandle.dispose();
+    if (record.genFn?.alive) record.genFn.dispose();
     if (record.collectRef?.alive) record.collectRef.dispose();
     record.vm.dispose();
     record.runtime.dispose();
@@ -557,6 +565,7 @@ export async function createSandboxHost({
     record.hookFn = vm.unwrapResult(vm.evalCode('(fn, ctx, stateJson) => globalThis.__applyHook(fn, ctx, stateJson)', 'hook.js'));
     record.opFn = vm.unwrapResult(vm.evalCode('(fn, stateJson, ops) => globalThis.__applyOp(fn, stateJson, ops)', 'op.js'));
     record.opsHandle = vm.getProp(vm.global, '__ops');
+    record.genFn = vm.unwrapResult(vm.evalCode('(fn, argJson) => globalThis.__applyGen(fn, argJson)', 'gen.js'));
     // ---- 模块加载器：'fate' → 门面；其余 → 包内文件（只认包内路径） ----
     const sources = new Map([['fate', fateModuleSource()]]);
     for (const [path, text] of pack.files) sources.set(path, text);
@@ -627,6 +636,7 @@ export async function createSandboxHost({
   function bindFunction(record, index, listName = 'skills') {
     const { vm } = record;
     const isOpsShape = listName === 'shopItems' || listName === 'events';
+    const isGenShape = listName === 'mapGenerators';
     return (...args) => {
       if (record.disposed) return undefined;
       // 失效的包一律空转。**不把异常抛进战斗**：一个第三方包把整局弄崩，
@@ -638,13 +648,15 @@ export async function createSandboxHost({
       // 两条形状分开接线：技能递 ctx，商店/事件递 ops
       if (isOpsShape) {
         record.currentOps = args[1];
-      } else {
+      } else if (!isGenShape) {
         record.currentContext = args[0];
       }
       const argsJson = vm.newString(
         isOpsShape
           ? JSON.stringify(snapshotEntity(args[0]))
-          : JSON.stringify([snapshotEntity(args[1]), (args[2] ?? []).map(snapshotEntity)]),
+          : isGenShape
+            ? JSON.stringify(args[0] ?? {})
+            : JSON.stringify([snapshotEntity(args[1]), (args[2] ?? []).map(snapshotEntity)]),
       );
       // 真跑过包代码的 runtime 一律不 free（对象表是否干净无从判断），改 park
       record.dirty = true;
@@ -652,9 +664,15 @@ export async function createSandboxHost({
       try {
         // 两条桥的参数顺序故意不同（技能先递 ctx、ops 先递 state），所以调用处也要分开：
         // 统一成一种形状就会把 ctx 当 JSON 传进去，现场只会看到"技能安静地没效果"
-        const result = isOpsShape
-          ? vm.callFunction(record.opFn, vm.undefined, handle, argsJson, record.opsHandle)
-          : vm.callFunction(record.applyFn, vm.undefined, handle, record.ctxHandle, argsJson);
+        let result;
+        if (isOpsShape) {
+          result = vm.callFunction(record.opFn, vm.undefined, handle, argsJson, record.opsHandle);
+        } else if (isGenShape) {
+          // 生成器只拿一个参数对象：argsJson 里存的就是 { seed, floorNumber }
+          result = vm.callFunction(record.genFn, vm.undefined, handle, argsJson);
+        } else {
+          result = vm.callFunction(record.applyFn, vm.undefined, handle, record.ctxHandle, argsJson);
+        }
         if (result.error) {
           const dumped = vm.dump(result.error);
           result.error.dispose();

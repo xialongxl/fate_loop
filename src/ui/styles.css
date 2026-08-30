@@ -2463,3 +2463,82 @@ code {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ── 补漏：被引用但一直没有规则的类 ──────────────────────────
+   来源：ui:audit 抓到 .menu-prev 零高度；其余由"JS 用到的类必须在
+   styles.css 里有规则"这条扫描扫出。排版悄悄塌掉比报错更难发现，
+   所以宁可补在这里也不要留空。 */
+
+.reward-chip.is-loot {
+  border-color: var(--accent);
+  color: #cfe0ff;
+}
+
+.gear-name {
+  font-weight: 600;
+}
+
+.screen-hint strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* 主菜单「回上一局自动档」——只在真有备份时渲染 */
+.menu-prev {
+  margin-top: 16px;
+}
+
+.menu-btn-prev {
+  border-color: #5a4a24;
+  color: #e0c98f;
+}
+
+.menu-btn-prev:hover {
+  border-color: var(--warn);
+  background: rgba(246, 217, 154, 0.07);
+}
+
+/* 地图种子面板里的内容指纹 */
+.seed-fingerprint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+/* 存档屏：导出 / 导入条 */
+.transfer-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.transfer-bar input[type='file'] {
+  display: none;
+}
+
+.transfer-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.slot-card .slot-export {
+  align-self: flex-start;
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.slot-card .slot-export:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}

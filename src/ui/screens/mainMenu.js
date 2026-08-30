@@ -93,6 +93,9 @@ export function createMainMenuScreen({
   async function refreshPrev() {
     if (getPrevSlot === null || onContinuePrev === null) return;
     prevSlot.replaceChildren();
+    // 先藏起来：没备份时留个空 div，其 margin 会在按钮之间撑出一道空隙
+    // （ui:audit 会把这种零高度容器报成可见元素）。
+    prevSlot.hidden = true;
     let slot = null;
     try {
       slot = await getPrevSlot();
@@ -113,6 +116,7 @@ export function createMainMenuScreen({
         )} 时被新局顶掉</small>
       </span>`;
     prevSlot.append(button);
+    prevSlot.hidden = false;
   }
 
   /** 异步刷新「继续游戏」的可用性。切屏时调用。 */

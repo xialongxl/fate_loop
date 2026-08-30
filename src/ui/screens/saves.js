@@ -40,7 +40,8 @@ export function createSavesScreen({
     </div>
     <p class="screen-hint">
       自动存档在每层开始与每场战斗结算后写入，不可手动覆盖。
-      手动槽需要局内才能保存。种子是复现整局的完整凭据。
+      手动槽需要局内才能保存。复现一整局需要 <strong>种子 + 内容指纹</strong>
+      两者：种子决定随机数流，指纹决定当时的官方内容版本。
     </p>
     <ul class="slot-list" data-slot="list"></ul>
   `;

@@ -208,6 +208,8 @@ export default [
         performance: 'readonly',
         setTimeout: 'readonly',
         queueMicrotask: 'readonly',
+        // 测试里用 URL 把仓库路径转 file: URL（jsdom 环境不提供）
+        URL: 'readonly',
       },
     },
     rules: {

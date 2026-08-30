@@ -26,19 +26,37 @@ import {
 } from '../../constants.js';
 import { fateApiKeys } from '../../../mods/fate-shim.js';
 
-/** 每个 kind 里"值是函数"的字段。表外的函数型字段直接拒绝，不静默丢。 */
+/**
+ * 每个 kind 里"值是函数"的字段。表外的函数型字段直接拒绝，不静默丢。
+ *
+ * **支持一层数组内路径**（`choices[].apply`）：事件的函数不是顶层字段，
+ * 而是嵌在选择项里 —— 只拆顶层就会把它当普通数据吐掉，然后事件安静地选不动。
+ */
 export const SANDBOX_FUNCTION_PROPS = Object.freeze({
   skills: ['execute', 'condition'],
   buffs: [],
   monsters: [],
   encounters: [],
   families: [],
+  shopItems: ['apply'],
+  events: ['choices[].apply'],
 });
 
-/** S2 首批开放的注册种类。 */
-export const SANDBOX_SUPPORTED_KINDS = Object.freeze(['families', 'skills', 'buffs', 'monsters', 'encounters']);
+/** `choices[].apply` → { list: 'choices', prop: 'apply' }；顶层字段返回 null。 */
+const NESTED_PROP = /^(\w+)\[\]\.(\w+)$/;
 
-/** API 方法 → 它写进哪个内容列表。暂未支持的也列出来，用于给出明确报错。 */
+/** 已开放的注册种类。 */
+export const SANDBOX_SUPPORTED_KINDS = Object.freeze([
+  'families',
+  'skills',
+  'buffs',
+  'monsters',
+  'encounters',
+  'shopItems',
+  'events',
+]);
+
+/** API 方法 → 它写进哪个内容列表。 */
 const METHOD_TARGETS = Object.freeze({
   begin: null,
   finish: null,
@@ -49,8 +67,10 @@ const METHOD_TARGETS = Object.freeze({
   buff: 'buffs',
   monster: 'monsters',
   encounter: 'encounters',
+  shopItem: 'shopItems',
+  event: 'events',
 });
-const NOT_YET_METHODS = Object.freeze(['shopItem', 'event', 'mapGenerator']);
+const NOT_YET_METHODS = Object.freeze(['mapGenerator']);
 
 const CONST_VALUES = Object.freeze({ SKILL_TYPE, SKILL_RANGE, STEP_MS, OGCD_SLOT_LIMIT, VICTORY_FLOOR });
 
@@ -92,12 +112,39 @@ globalThis.__ctx = {
   get floorNumber() { return globalThis.__opNum('floorNumber', 'null'); },
 };
 globalThis.__applyFn = (fn, ctx, argsJson) => {
-  const args = JSON.parse(argsJson);
+  const args = globalThis.__freeze(JSON.parse(argsJson));
   return fn(ctx, args[0], args[1]);
+};
+// 递进 VM 的一切都是**快照**，冻住它。理由：官方技能的 execute 能直接改实体，
+// 而包改的是拷贝 —— 不冻的话写 state.player.hp = 999 会**静默无效**，
+// 那正是"看着生效其实没生效"最难查的一类。冻住之后它立刻抛 TypeError，
+// 宿主接住、摘包、报给 UI。包要产生效果只能走 ctx / ops。
+// （注：这段是模板字符串里的 VM 代码，注释里**不能写反引号** —— 会提前终结模板）
+globalThis.__freeze = (v) => {
+  if (v === null || typeof v !== 'object' || Object.isFrozen(v)) return v;
+  for (const key of Object.keys(v)) globalThis.__freeze(v[key]);
+  return Object.freeze(v);
 };
 // 钩子签名是 (ctx, state)，与技能的 (ctx, self, targets) 不同 —— 分开一条，
 // 不往 args 里塞 null 占位（那会让作者以为能拿到 targets）
-globalThis.__applyHook = (fn, ctx, stateJson) => fn(ctx, JSON.parse(stateJson));
+globalThis.__applyHook = (fn, ctx, stateJson) => fn(ctx, globalThis.__freeze(JSON.parse(stateJson)));
+// 商店/事件的 apply(state, ops)：state 是快照，改动只能通过 ops 走官方原语
+globalThis.__applyOp = (fn, stateJson, ops) => fn(globalThis.__freeze(JSON.parse(stateJson)), ops);
+globalThis.__ops = {
+  permanentBonus: (b) => {
+    globalThis.__opVal('permanentBonus', JSON.stringify(b ?? {}));
+  },
+  get shards() { return globalThis.__opNum('shards', 'null'); },
+  gainShards: (n) => globalThis.__opVal('gainShards', JSON.stringify(Number(n) || 0)),
+  // 布尔过界只能借数字（VM 里没有 JS 布尔可传）：宿主回 1/0，这里 !! 转回来。
+  // 写 === true 会永远 false，表现为"扣钱成功但什么都不发生"——最难查的那种
+  spendShards: (n) => !!globalThis.__opVal('spendShards', JSON.stringify(Number(n) || 0)),
+  setShards: (n) => globalThis.__opVal('setShards', JSON.stringify(Number(n) || 0)),
+  healRatio: (r) => globalThis.__opVal('healRatio', JSON.stringify(Number(r) || 0)),
+  hpCostRatio: (r) => globalThis.__opVal('hpCostRatio', JSON.stringify(Number(r) || 0)),
+  fullHeal: () => globalThis.__opVal('fullHeal', 'null'),
+  addMetadata: (k, v) => globalThis.__opVal('addMetadata', JSON.stringify([String(k), Number(v) || 0])),
+};
 `;
 
 /** `'fate'` 的 ESM 门面。具名导出必须是静态的 —— 包作者写的是 `import { skill } from 'fate'`。 */
@@ -107,7 +154,7 @@ function fateModuleSource() {
   );
   const notYet = NOT_YET_METHODS.map(
     (name) =>
-      `export const ${name} = () => { throw new Error('fate.${name}() 在 S2 尚未开放（当前支持：begin/family/skill/buff/monster/encounter/finish）'); };`,
+      `export const ${name} = () => { throw new Error('fate.${name}() 尚未开放（当前支持：begin/family/skill/buff/monster/encounter/shopItem/event/onBattleStart/finish）'); };`,
   );
   const consts = Object.keys(CONST_VALUES).map((name) => `export const ${name} = globalThis.__fate.${name};`);
   return [...methods, ...notYet, ...consts, 'export default globalThis.__fate;'].join('\n');
@@ -129,6 +176,30 @@ export function snapshotEntity(entity) {
 }
 
 /** ctx 的读操作要 JSON 化，写操作直接透传。 */
+/**
+ * ops 白名单（商店/事件的写入口）。清单与 fate-shim 的 STATE_OPERATIONS 对拍，
+ * 两边不一致就是"文档能做、运行时一调就报错"。不在这张表里的操作根本不存在，
+ * 所以包改不了它本来就该改不了的东西（序列、等级、地图）。
+ */
+const STATE_OP_METHODS = Object.freeze([
+  'permanentBonus',
+  'shards',
+  'gainShards',
+  'spendShards',
+  'setShards',
+  'healRatio',
+  'hpCostRatio',
+  'fullHeal',
+  'addMetadata',
+]);
+
+function invokeStateOp(ops, kind, arg) {
+  if (!STATE_OP_METHODS.includes(kind)) throw new Error(`ops.${kind} 不存在`);
+  if (kind === 'shards') return ops.shards;
+  if (kind === 'addMetadata') return ops.addMetadata(arg[0], arg[1]);
+  return ops[kind](arg);
+}
+
 function invokeContextOp(context, kind, arg) {
   switch (kind) {
     case 'damage':
@@ -263,6 +334,8 @@ export async function createSandboxHost({
     if (record.ctxHandle?.alive) record.ctxHandle.dispose();
     if (record.applyFn?.alive) record.applyFn.dispose();
     if (record.hookFn?.alive) record.hookFn.dispose();
+    if (record.opFn?.alive) record.opFn.dispose();
+    if (record.opsHandle?.alive) record.opsHandle.dispose();
     if (record.collectRef?.alive) record.collectRef.dispose();
     record.vm.dispose();
     record.runtime.dispose();
@@ -299,6 +372,8 @@ export async function createSandboxHost({
       failed: false,
       failureReason: null,
       currentContext: null,
+      /** 商店/事件结算中：当前那套 ops（真实对象，只在 apply 调用期间非空） */
+      currentOps: null,
       disposed: false,
     };
     runtime.setInterruptHandler(() => {
@@ -322,16 +397,51 @@ export async function createSandboxHost({
         }
         const funcProps = {};
         for (const prop of SANDBOX_FUNCTION_PROPS[listName] ?? []) {
-          const handle = vm.getProp(specHandle, prop);
-          if (vm.typeof(handle) === 'function') {
-            const index = record.functions.size;
-            record.functions.set(index, handle);
-            funcProps[prop] = index;
-          } else if (handle !== vm.undefined && handle !== vm.null) {
-            // vm.undefined / vm.null 是库内**共享静态句柄**，dispose 它等于把整个
-            // context 的 undefined 杀掉，之后每次属性读取都报 "Lifetime not alive"
-            handle.dispose();
+          const nested = NESTED_PROP.exec(prop);
+          if (nested === null) {
+            const handle = vm.getProp(specHandle, prop);
+            if (vm.typeof(handle) === 'function') {
+              const index = record.functions.size;
+              record.functions.set(index, handle);
+              funcProps[prop] = index;
+            } else if (handle !== vm.undefined && handle !== vm.null) {
+              // vm.undefined / vm.null 是库内**共享静态句柄**，dispose 它等于把整个
+              // context 的 undefined 杀掉，之后每次属性读取都报 "Lifetime not alive"
+              handle.dispose();
+            }
+            continue;
           }
+          // 一层数组内路径：choices[].apply —— 逐项取，函数按 "list#i.prop" 记
+          const [, listKey, itemProp] = nested;
+          const listHandle = vm.getProp(specHandle, listKey);
+          const length = vm.getLength(listHandle) ?? 0;
+          for (let i = 0; i < length; i += 1) {
+            const itemHandle = vm.getProp(listHandle, i);
+            const handle = vm.getProp(itemHandle, itemProp);
+            if (vm.typeof(handle) === 'function') {
+              const index = record.functions.size;
+              record.functions.set(index, handle);
+              funcProps[`${listKey}#${i}.${itemProp}`] = index;
+            } else if (handle !== vm.undefined && handle !== vm.null) {
+              handle.dispose();
+            }
+            // 数组项里的**其他**函数型字段同样不能静默丢（choices[].onPick 这种）
+            const itemNames = vm.getOwnPropertyNames(itemHandle).unwrap();
+            for (const nameHandle of itemNames) {
+              const itemName = String(vm.dump(nameHandle));
+              if (itemName === itemProp) continue;
+              const value = vm.getProp(itemHandle, itemName);
+              const isFunction = vm.typeof(value) === 'function';
+              if (value !== vm.undefined && value !== vm.null) value.dispose();
+              if (isFunction) {
+                itemNames.dispose();
+                throw new Error(`${listName}.${listKey}[${i}].${itemName} 是函数，沙箱不接收`);
+              }
+            }
+            itemNames.dispose();
+            if (itemHandle !== vm.undefined && itemHandle !== vm.null) itemHandle.dispose();
+          }
+          if (listHandle !== vm.undefined && listHandle !== vm.null) listHandle.dispose();
         }
         // 白名单外的函数型字段：静默丢弃会让人查一整天，直接拒
         const names = vm.getOwnPropertyNames(specHandle).unwrap();
@@ -422,6 +532,22 @@ export async function createSandboxHost({
     });
     vm.setProp(vm.global, '__opNum', opNum);
     opNum.dispose();
+    // ops 通道：返回**任意 JSON**（spendShards 要返回布尔、shards 要返回数字）
+    const opVal = vm.newFunction('__opVal', (kindHandle, argHandle) => {
+      const kind = String(vm.dump(kindHandle));
+      const raw = JSON.parse(String(vm.dump(argHandle) ?? 'null'));
+      const ops = record.currentOps;
+      if (ops === null || ops === undefined) {
+        throw new Error(`${pack.id}: 在商店/事件结算之外调用了 ops.${kind}()`);
+      }
+      const result = invokeStateOp(ops, kind, raw);
+      if (typeof result === 'string') return vm.newString(result);
+      if (typeof result === 'number') return vm.newNumber(result);
+      if (typeof result === 'boolean') return vm.newNumber(result ? 1 : 0);
+      return vm.undefined;
+    });
+    vm.setProp(vm.global, '__opVal', opVal);
+    opVal.dispose();
 
     // 预lude 最后一个表达式是函数值，句柄不 dispose 会让 runtime 释放时撞上
     // gc_obj_list 断言 —— 那是 wasm 级 abort，整个页面一起没
@@ -429,7 +555,8 @@ export async function createSandboxHost({
     record.ctxHandle = vm.getProp(vm.global, '__ctx');
     record.applyFn = vm.unwrapResult(vm.evalCode('(fn, ctx, argsJson) => globalThis.__applyFn(fn, ctx, argsJson)', 'apply.js'));
     record.hookFn = vm.unwrapResult(vm.evalCode('(fn, ctx, stateJson) => globalThis.__applyHook(fn, ctx, stateJson)', 'hook.js'));
-
+    record.opFn = vm.unwrapResult(vm.evalCode('(fn, stateJson, ops) => globalThis.__applyOp(fn, stateJson, ops)', 'op.js'));
+    record.opsHandle = vm.getProp(vm.global, '__ops');
     // ---- 模块加载器：'fate' → 门面；其余 → 包内文件（只认包内路径） ----
     const sources = new Map([['fate', fateModuleSource()]]);
     for (const [path, text] of pack.files) sources.set(path, text);
@@ -492,9 +619,14 @@ export async function createSandboxHost({
     }
   }
 
-  /** 把 VM 函数包成宿主可调的 JS 函数（execute 与 condition 同签名）。 */
-  function bindFunction(record, index) {
+  /**
+   * 把 VM 函数包成宿主可调的 JS 函数。
+   * 两种签名按内容类型选：技能是 (ctx, self, targets)，
+   * 商店/事件是 (state, ops) —— 后者拿不到 ctx，因为它不在战斗里。
+   */
+  function bindFunction(record, index, listName = 'skills') {
     const { vm } = record;
+    const isOpsShape = listName === 'shopItems' || listName === 'events';
     return (...args) => {
       if (record.disposed) return undefined;
       // 失效的包一律空转。**不把异常抛进战斗**：一个第三方包把整局弄崩，
@@ -503,15 +635,26 @@ export async function createSandboxHost({
       if (record.failed) return undefined;
       const handle = record.functions.get(index);
       if (handle === undefined) return undefined;
-      record.currentContext = args[0];
+      // 两条形状分开接线：技能递 ctx，商店/事件递 ops
+      if (isOpsShape) {
+        record.currentOps = args[1];
+      } else {
+        record.currentContext = args[0];
+      }
       const argsJson = vm.newString(
-        JSON.stringify([snapshotEntity(args[1]), (args[2] ?? []).map(snapshotEntity)]),
+        isOpsShape
+          ? JSON.stringify(snapshotEntity(args[0]))
+          : JSON.stringify([snapshotEntity(args[1]), (args[2] ?? []).map(snapshotEntity)]),
       );
       // 真跑过包代码的 runtime 一律不 free（对象表是否干净无从判断），改 park
       record.dirty = true;
       enter(record);
       try {
-        const result = vm.callFunction(record.applyFn, vm.undefined, handle, record.ctxHandle, argsJson);
+        // 两条桥的参数顺序故意不同（技能先递 ctx、ops 先递 state），所以调用处也要分开：
+        // 统一成一种形状就会把 ctx 当 JSON 传进去，现场只会看到"技能安静地没效果"
+        const result = isOpsShape
+          ? vm.callFunction(record.opFn, vm.undefined, handle, argsJson, record.opsHandle)
+          : vm.callFunction(record.applyFn, vm.undefined, handle, record.ctxHandle, argsJson);
         if (result.error) {
           const dumped = vm.dump(result.error);
           result.error.dispose();
@@ -523,7 +666,7 @@ export async function createSandboxHost({
             record,
             wasInterrupt
               ? `执行超过 ${budgetMs}ms 被打断（疑似死循环）`
-              : `技能执行抛错：${message}`,
+              : `${isOpsShape ? 'apply' : '技能'}执行抛错：${message}`,
           );
           return undefined;
         }
@@ -544,6 +687,7 @@ export async function createSandboxHost({
         argsJson.dispose();
         exit(record);
         record.currentContext = null;
+        record.currentOps = null;
       }
     };
   }
@@ -597,11 +741,22 @@ export async function createSandboxHost({
    * `mergeIntoPool` 的结果形状 `{ skills: [], buffs: [], ... }`。
    */
   function drainRegistrations(record) {
-    const out = { families: [], skills: [], buffs: [], monsters: [], encounters: [] };
+    // 形状从 SANDBOX_SUPPORTED_KINDS 推导，不手写清单 —— 手写那次加 shopItems/events
+    // 就直接漏了（out[list] undefined，注册静默丢掉）
+    const out = Object.fromEntries(SANDBOX_SUPPORTED_KINDS.map((kind) => [kind, []]));
     for (const reg of record.registrations) {
       const spec = { ...reg.data };
       for (const [prop, index] of Object.entries(reg.funcProps)) {
-        spec[prop] = bindFunction(record, index);
+        const nested = /^(\w+)#(\d+)\.(\w+)$/.exec(prop);
+        if (nested === null) {
+          spec[prop] = bindFunction(record, index, reg.list);
+        } else {
+          const [, listKey, position, itemProp] = nested;
+          const item = spec[listKey]?.[Number(position)];
+          if (item !== undefined && item !== null) {
+            item[itemProp] = bindFunction(record, index, reg.list);
+          }
+        }
       }
       spec.__sourcePack = record.pack.id;
       out[reg.list].push(spec);

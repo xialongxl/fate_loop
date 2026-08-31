@@ -30,10 +30,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Node 版本与本地对齐（本仓库在 Node 24 上验证）
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
 
@@ -52,8 +52,10 @@ jobs:
         run: npm run deploy:check
 
       - uses: actions/configure-pages@v5
+        with: 
+          enablement: true
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           # deploy:check 刚刚重新构建过，直接用它产出的 dist
           path: dist
@@ -66,4 +68,4 @@ jobs:
       url: ${{ steps.out.outputs.page_url }}
     steps:
       - id: out
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

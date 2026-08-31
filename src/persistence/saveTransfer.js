@@ -29,6 +29,12 @@ const LIMITS = Object.freeze({
   inventory: 200,
   slots: MAX_RECORDS_PER_FILE,
   statMax: 1e9,
+  /**
+   * 种子是 uint32（`prng.toUint32`，0 … 2^32-1），**不能复用 statMax**。
+   * 之前 seed 走的是属性上限 1e9，于是任何大于 10 亿的合法种子都导得出去、
+   *  import 不回来 —— 报的还是"seed 必须是非负整数"，看着像数据坏了。
+   */
+  seedMax: 4_294_967_295,
 });
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -71,7 +77,8 @@ function validateRun(run) {
     return `存档版本不兼容：文件为 v${String(run.schemaVersion)}，当前引擎为 v${SCHEMA_VERSION}`;
   }
   const checks = [
-    nonNegativeInt(Number.isInteger(run.seed) ? run.seed : NaN, 'seed'),
+    nonNegativeInt(Number.isInteger(run.seed) ? run.seed : NaN, 'seed', LIMITS.seedMax) ??
+      (run.seed === undefined ? 'seed 必须存在' : null),
     nonNegativeInt(run.floorNumber, 'floorNumber', 1_000_000) ?? (run.floorNumber < 1 ? 'floorNumber 至少为 1' : null),
     nonNegativeInt(run.exp, 'exp'),
     nonNegativeInt(run.fateShards, 'fateShards'),

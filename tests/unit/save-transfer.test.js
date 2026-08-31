@@ -17,6 +17,8 @@ import {
   summarizeImportedSlot,
 } from '../../src/persistence/saveTransfer.js';
 import { SaveService } from '../../src/persistence/saveService.js';
+import { serializeRun } from '../../src/persistence/schema.js';
+import { createInitialState } from '../../src/core/initialState.js';
 import { SCHEMA_VERSION } from '../../src/core/constants.js';
 import { createHarness } from '../helpers.js';
 import { resetAdapterCache } from '../../src/persistence/storageAdapter.js';
@@ -132,6 +134,50 @@ describe('往返', () => {
     expect(parsed.slots[0].run.seed).toBe(777);
     expect(parsed.slots[0].run.floorNumber).toBe(2);
     expect(parsed.slots[0].contentHash).toBe('1234abcd');
+  });
+});
+
+// ============================================================
+// 真实丢档回归：种子是 uint32，不能被属性上限卡住
+// ============================================================
+
+describe('种子范围', () => {
+  // 玩家真实案例：随机种子 2462498413 导得出去、导入却报"seed 必须是非负整数"
+  const REAL_SEED = 2462498413;
+
+  const caseRun = (seed) => {
+    const state = createInitialState(seed, { gcdSequence: ['blade.jab'], ogcdSlots: [] });
+    state.player.exp = 100;
+    return state;
+  };
+
+  it.each([
+    ['0（最小合法值）', 0],
+    ['1e9 以上（旧上限会误杀）', 1_000_000_001],
+    ['玩家真实种子', REAL_SEED],
+    ['uint32 上边界', 4_294_967_295],
+  ])('种子 %s 能完整往返', async (_label, seed) => {
+    const text = JSON.stringify(buildExport({ slotId: 'slot1', record: { savedAt: 5, run: serializeRun(caseRun(seed)) } }));
+    const parsed = parseImport(text);
+    expect(parsed.ok, parsed.reason).toBe(true);
+    expect(parsed.slots[0].run.seed).toBe(seed);
+  });
+
+  it('超出 uint32 的种子仍然要拒（不是所有大数都合法）', () => {
+    const text = JSON.stringify(
+      buildExport({ slotId: 'slot1', record: { savedAt: 5, run: serializeRun(caseRun(1)) } }),
+    );
+    const broken = JSON.parse(text);
+    broken.slots[0].run.seed = 4_294_967_296;
+    const parsed = parseImport(JSON.stringify(broken));
+    expect(parsed.ok).toBe(false);
+    expect(parsed.reason).toMatch(/seed/);
+  });
+
+  it('导出的文件名里的种子与内容指纹不会被这个 bug 影响（只是曾经导入侧读不回）', () => {
+    const run = serializeRun(caseRun(REAL_SEED));
+    expect(Number.isInteger(run.seed)).toBe(true);
+    expect(run.seed).toBeGreaterThan(1e9); // 旧上限就是死在这
   });
 });
 

@@ -145,10 +145,55 @@ describe('外壳启动', () => {
     expect(textOf('[data-field="storage"]')).toMatch(/存档后端：(indexeddb|localstorage|memory)/);
   });
 
-  it('无自动存档时「继续游戏」禁用而不是藏起来', async () => {
+  it('没有任何存档时「继续游戏」禁用而不是藏起来', async () => {
     await tick();
     expect(q('[data-act="continue"]').disabled).toBe(true);
-    expect(q('[data-slot="continue-note"]').textContent).toContain('暂无自动存档');
+    // 文案不再限定"自动存档"：继续游戏现在跨四个槽位判断（见 continuePolicy）
+    expect(q('[data-slot="continue-note"]').textContent).toContain('暂无可继续的存档');
+  });
+
+  /**
+   * 回归：以前「继续游戏」写死读自动槽。玩家误点一次新的轮回之后，
+   * 自动槽是 Lv.1 空局、而 Lv.14 那局躺在手动槽里 —— 点"继续"会被领进空局，
+   * 看起来就像存档全没了。现在按"时间优先、空局则降级到进度最高"选。
+   */
+  it('自动槽被误点的新局占着时，继续游戏读的是有进度的手动槽', async () => {
+    await tick();
+    // 先认真玩一局存进 slot1（有 exp、有胜场）
+    startRun(app);
+    app.store.update((d) => {
+      d.player.exp = 4000;
+      d.metadata.battlesWon = 12;
+      d.floorNumber = 6;
+    });
+    app.saveService.saveToSlot('slot1', app.store.unsafeGetState());
+    await app.saveService.flush();
+
+    // 自动槽刷成"什么都没发生过"的空局。
+    // 注意要**绕过 GameFlow 的门禁**直接写盘：新局没进度时根本不会落盘，
+    // 而玩家手上那份空自动档是旧版本（门禁之前）留下的遗留数据 —— 这里模拟的
+    // 就是它。给自动槽加任何真进度都会让"时间优先"正确地选中它，测不到降级。
+    const { createInitialState } = await import('../../src/core/initialState.js');
+    app.saveService.saveRun(createInitialState(999001, { gcdSequence: [], ogcdSlots: [] }));
+    await app.saveService.flush();
+    app.gotoMenu();
+    await tick();
+
+    const note = q('[data-slot="continue-note"]').textContent;
+    expect(note, '按钮该说清会打开哪一份').toContain('存档位 1');
+    expect(note).toContain('第 6 层');
+    // 降级这件事要写在按钮上，不能等点下去才发现
+    expect(note).toContain('改读进度更高的');
+
+    click(q('[data-act="continue"]'));
+    await tick(4);
+    const okButton = document.querySelector('.dialog-box [data-confirm]');
+    if (okButton !== null) {
+      okButton.click();
+      await tick(4);
+    }
+    expect(app.snapshot().player.exp).toBe(4000);
+    expect(app.snapshot().seed).not.toBe(999001);
   });
 });
 

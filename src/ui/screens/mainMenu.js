@@ -16,7 +16,7 @@ export function createMainMenuScreen({
   onContinue,
   onNewGame,
   onOpen,
-  getAutoSlot,
+  getContinueSlot,
   getPrevSlot = null,
   onContinuePrev = null,
 }) {
@@ -127,28 +127,39 @@ export function createMainMenuScreen({
   }
 
   /** 异步刷新「继续游戏」的可用性。切屏时调用。 */
+  /**
+   * 按钮副标题必须说清“继续”会打开**哪一份**存档。
+   * 以前它只读自动槽却不写出来，玩家不知道点下去会回到哪儿。
+   */
   async function refreshContinue() {
     continueBtn.disabled = true;
     continueNote.textContent = '检查存档…';
     let slot = null;
     try {
-      slot = await getAutoSlot();
+      slot = await getContinueSlot();
     } catch {
       slot = null;
     }
 
     if (slot === null || slot.empty === true) {
-      continueNote.textContent = '暂无自动存档';
+      continueNote.textContent = '暂无可继续的存档';
       return;
     }
     if (slot.incompatible === true) {
-      continueNote.textContent = `存档版本不兼容（v${escapeHtml(slot.schemaVersion)}）`;
+      continueNote.textContent = `存档版本不兼容（v${escapeHtml(String(slot.schemaVersion ?? '?'))}）`;
       return;
     }
     continueBtn.disabled = false;
-    continueNote.textContent = `第 ${slot.floorNumber} 层 · 已清理 ${slot.nodesCleared} 节点 · ${formatTimestamp(
-      slot.savedAt,
-    )}`;
+    const level = levelFromTotalExp(slot.exp ?? 0);
+    const bits = [
+      slot.label ?? (slot.auto === true ? '自动存档' : '存档'),
+      `第 ${String(slot.floorNumber ?? '?')} 层`,
+      `Lv.${String(level)}`,
+      formatTimestamp(slot.savedAt),
+    ];
+    // 降级读取要写在按钮上，而不是等点下去才发现“这不是我最近那份”
+    if (slot.downgraded === true) bits.unshift('最新那份还没打过 · 改读进度更高的');
+    continueNote.textContent = bits.join(' · ');
   }
 
   return {

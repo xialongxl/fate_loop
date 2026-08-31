@@ -34,6 +34,7 @@ import { SKILL_FAMILY_LABELS } from './core/constants.js';
 import { describeGear, rarityOf } from './core/equipment.js';
 import { SaveService, AUTO_BACKUP_LIMIT } from './persistence/saveService.js';
 import { levelFromTotalExp } from './core/progression.js';
+import { pickResumableSlot } from './persistence/continuePolicy.js';
 import { SAVE_SLOT_IDS, slotLabel } from './persistence/schema.js';
 import {
   buildExport,
@@ -423,9 +424,21 @@ export async function createApp({
       },
       onNewGame: () => openNewGameDialog(),
       onOpen: (id) => router.go(id, { push: true }),
-      getAutoSlot: async () => {
+      /**
+       * 「继续游戏」该开哪一份 —— 跨四个槽位判断，不是只看自动槽。
+       * 规则与理由见 persistence/continuePolicy.js（写死自动槽曾经会把玩家
+       * 从 Lv.14 的手动档领进误点新局刷出来的 Lv.1 空档，看起来像丢档）。
+       */
+      getContinueSlot: async () => {
         const slots = await saveService.listSlots();
-        return slots.find((s) => s.slotId === AUTO_SAVE_SLOT) ?? null;
+        const picked = pickResumableSlot(slots);
+        if (picked === null) return { empty: true };
+        const allIncompatible = slots.every((slot) => slot.empty === true || slot.incompatible === true);
+        if (allIncompatible) {
+          const broken = slots.find((slot) => slot.incompatible === true);
+          return { incompatible: true, schemaVersion: broken?.schemaVersion ?? null };
+        }
+        return { ...picked.slot, downgraded: picked.downgraded, label: slotLabel(picked.slot.slotId) };
       },
     }),
 
@@ -981,13 +994,29 @@ export async function createApp({
   }
 
   async function continueRun() {
-    const loadedSlot = await saveService.loadSlot(AUTO_SAVE_SLOT);
+    const slots = await saveService.listSlots();
+    const picked = pickResumableSlot(slots);
+    if (picked === null) {
+      notify('没有可继续的存档', 'warn');
+      return;
+    }
+    const loadedSlot = await saveService.loadSlot(picked.slot.slotId);
     if (loadedSlot === null) {
-      notify('没有可继续的自动存档', 'warn');
+      notify('那一份存档读不回来，请到存档屏重新选择', 'warn');
       return;
     }
     if (!(await confirmContentMismatch(loadedSlot))) return;
     restoreRun(loadedSlot.run);
+    // 降级读取必须说出来：玩家有权知道"继续"打开的不是最新那份
+    if (picked.downgraded) {
+      notify(
+        `已继续「${slotLabel(picked.slot.slotId)}」（第 ${String(picked.slot.floorNumber ?? '?')} 层）` +
+          '—— 最新那份是还没打过的新局，所以按进度选了这份',
+        'info',
+      );
+      return;
+    }
+    notify(`已继续「${slotLabel(picked.slot.slotId)}」`, 'info');
   }
 
   /** 从"上一局自动档"备份读回（读成功后删掉备份，避免一个档被反复回退）。 */

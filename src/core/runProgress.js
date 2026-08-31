@@ -18,6 +18,9 @@
 const countOf = (value) => {
   if (value instanceof Set || value instanceof Map) return value.size;
   if (Array.isArray(value)) return value.length;
+  // 存档摘要（summarizeSave）给的是**计数**而不是集合：`nodesCleared: 8`。
+  // 容忍数字，是为了让调用方不必造 `new Array(n).fill('_')` 这种假集合来喂判定。
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
   return 0;
 };
 

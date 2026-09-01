@@ -814,14 +814,13 @@ dd {
   margin-top: 16px;
 }
 
-/* 商店这类长对话框：`.dialog-box` 是 overflow-y:auto 的，内容能滚，
-   但“离开”是玩家随时要按得着的那个 —— 靠滚才能关掉的对话框很坑人。
-   sticky 只在能滚的容器里有意义，所以限定在 .dialog-box 里。 */
+/* 长对话框里“离开”不该靠滚才能按：sticky + 上方一条分隔线（参考图同样有线）。 */
 .dialog-box .dialog-actions {
   position: sticky;
   bottom: -20px; /* 抵掉 .dialog-box 的 padding-bottom，贴住内边距下沿 */
   margin: 16px -22px -20px;
-  padding: 8px 22px 4px;
+  padding: 10px 22px 4px;
+  border-top: 1px solid var(--border);
   background: linear-gradient(to top, var(--bg-raised) 70%, rgba(22, 27, 34, 0));
 }
 
@@ -839,14 +838,14 @@ dd {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .shop-item, .event-choice {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 7px 10px;
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -874,35 +873,51 @@ dd {
   overflow-wrap: anywhere;
 }
 
-/* 价格并进按钮文案后，按钮就是那一行的右端锚点：定宽让三行的
-   按钮左边缘对齐，扫价格时眼珠不用每次重新找位置 */
+/* 价格并进按钮文案后，按钮就是那一行的右端锚点：定宽让各行的按钮左边缘对齐，
+   扫价格时眼珠不用重新找位置。外观复用 .btn-ghost（细边框暗字，它的禁用态
+   已经过对比度量测），价格另上金色 —— 与参考图一致。 */
 .shop-buy {
   flex: 0 0 auto;
-  min-width: 84px;
-  font-family: var(--mono);
-  font-size: 12px;
+  min-width: 92px;
   white-space: nowrap;
+}
+
+.shop-price {
+  font-family: var(--mono);
+  color: var(--warn);
+  margin-left: 3px;
 }
 
 /* 商店对话框里的三段（商品 / 装备货架 / ATM）靠分隔线分组，
    不靠卡片边框 —— 以前 ATM 直接接在货架后面，读起来像“货架的第四行”。
    条目仍用卡片（可点区域要有边界，触屏与低对比屏靠它）。 */
 .shop-section + .shop-section {
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--border);
 }
 
+/* 段标题居中 + 亮色：参考图里“前瞻性投资系统”“收藏品”都是居中的亮字，
+   天然读作“分节”；左对齐灰字只读作“上一个列表的注脚”。 */
 .shop-section-title {
-  margin: 0 0 7px;
+  margin: 0 0 8px;
+  text-align: center;
   font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
+  letter-spacing: 0.06em;
+  color: var(--accent);
 }
 
 .shop-section.is-atm .shop-section-title {
-  color: var(--accent);
+  color: var(--elite);
+}
+
+/* 顶部钱包行：数字用金色 mono，跟参考图一样一眼定位到“我现在有多少” */
+.shop-wallet b {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--warn);
+  margin: 0 2px;
 }
 
 /* ============================================================
@@ -1032,8 +1047,9 @@ code {
 .atm-line {
   margin: 2px 0 0;
   font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--accent);
+  font-size: 12px;
+  /* 金色：参考图里「存款余额…」那行是金色 —— 它是这一段唯一要读的数字 */
+  color: var(--warn);
   overflow-wrap: anywhere;
 }
 
@@ -1054,6 +1070,7 @@ code {
   flex-wrap: wrap;
   gap: 5px;
   align-items: center;
+  justify-content: center; /* 参考图里两排按钮是居中的 */
   margin-top: 6px;
 }
 

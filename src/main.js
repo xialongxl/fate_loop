@@ -809,8 +809,8 @@ export async function createApp({
       const gearShelf = flow.getShopGear();
       box.innerHTML = `
         <h2 tabindex="-1">流浪货摊</h2>
-        <p class="dialog-text">持有命运碎片：<strong>${formatNumber(state.fateShards)}</strong>
-          · 背包 ${state.player.inventory.length} / ${INVENTORY_CAPACITY}</p>
+        <p class="dialog-text shop-wallet">持有命运碎片<b>${formatNumber(state.fateShards)}</b>
+          · 背包 <b>${state.player.inventory.length} / ${INVENTORY_CAPACITY}</b></p>
         <section class="shop-section">
           <h3 class="shop-section-title">商品</h3>
           <ul class="shop-list">
@@ -824,10 +824,12 @@ export async function createApp({
                     <span class="shop-item-name">${escapeHtml(offer.name)}</span>
                     <span class="shop-item-desc">${escapeHtml(offer.description)}</span>
                   </span>
-                  <!-- 价格并进按钮：一行里三个右对齐元素（名称/价格/按钮）是噪声，
-                       而“买得起吗”与“多少钱”本来就是同一个问题 -->
-                  <button type="button" class="shop-buy" data-buy="${escapeHtml(offer.id)}"
-                          ${bought || !affordable ? 'disabled' : ''}>${bought ? '已购买' : `购买 ${offer.cost}`}</button>
+                  <!-- 价格并进按钮：一行里三个右对齐元素（名称/价格/按钮）是噪声。
+                       样式用 .btn-ghost（细边框 + 暗字），价格单独上金色 —— 跟参考图一样。
+                       复用 .btn-ghost 不是偷懒：它是对话框里所有“不主推”按钮的现有样式，
+                       而且它的禁用态已经过对比度量测，自己写一套很容易把 contrast 做负。 -->
+                  <button type="button" class="btn-ghost shop-buy" data-buy="${escapeHtml(offer.id)}"
+                          ${bought || !affordable ? 'disabled' : ''}>${bought ? '已购买' : `购买 <span class="shop-price">${offer.cost}</span>`}</button>
                 </li>`;
               })
               .join('')}
@@ -850,8 +852,8 @@ export async function createApp({
                          （色弱、高对比屏、手机阳光下） -->
                     <span class="shop-item-desc">${escapeHtml(`${rarity.name} · ${describeGear(gear)}`)}</span>
                   </span>
-                  <button type="button" class="shop-buy" data-buy-gear="${escapeHtml(gear.id)}"
-                          ${bought || !affordable ? 'disabled' : ''}>${bought ? '已购买' : `购入 ${price}`}</button>
+                  <button type="button" class="btn-ghost shop-buy" data-buy-gear="${escapeHtml(gear.id)}"
+                          ${bought || !affordable ? 'disabled' : ''}>${bought ? '已购买' : `购入 <span class="shop-price">${price}</span>`}</button>
                 </li>`;
               })
               .join('')}

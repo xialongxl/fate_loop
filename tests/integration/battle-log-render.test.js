@@ -84,6 +84,28 @@ describe('战斗日志渲染', () => {
     app.destroy();
   });
 
+  /**
+   * 回归：日志比战场活得久。
+   * 结算后 state.monsters 已清空，只查当前快照会把内部 id 直接印到屏幕上
+   * （实测长这样：【mon.shadow.reaver.t1#0】吞噬 击中你！）。
+   */
+  it('结算后怪物已从快照消失，日志仍然显示单位名而不是 id', async () => {
+    const app = await mount();
+    await fightOnce(app);
+    app.flow.finishBattle();          // 这一步会清空 monsters
+    app.renderAll();
+    await tick();
+    expect(app.snapshot().monsters, '前置：结算后 monsters 应为空').toHaveLength(0);
+    const all = qa('.screen-battle .log-entry').map((li) => li.textContent);
+    expect(all.length).toBeGreaterThan(0);
+    for (const line of all) {
+      expect(line, `日志漏出内部 id：${line}`).not.toMatch(/mon\.[a-z]/);
+      expect(line).not.toMatch(/#\d/);
+      expect(line).not.toMatch(/ogcd\.|blade\.|fire\.|frost\.|shadow\.|thunder\.|order\./);
+    }
+    app.destroy();
+  });
+
   it('叙事行不套战斗模板（game.js 的提示与第三方包 ctx.log 都走这条）', async () => {
     const app = await mount();
     await fightOnce(app);

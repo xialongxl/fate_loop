@@ -22,6 +22,8 @@
 
 /** 每类事件的图标。用单色符号：彩色 emoji 在 Windows 下宽度不一，会破坏对齐。 */
 export const LOG_ICONS = Object.freeze({
+  me: '★',      // 我方施放
+  foe: '⌁',     // 敌方攻击 —— 方向信息，不能与 me 共用一个图标
   damage: '★',
   crit: '◆',
   heal: '✚',
@@ -66,6 +68,8 @@ export function logRows(entry, resolve = {}) {
       // 敌方攻击我方时主语换成单位名 —— "谁在打我"才是玩家要读的信息，
       // 而我方攻击时技能名比单位名有用（玩家认得技能，认不住六种怪的名字）
       const fromFoe = entry.actorId !== null && !isPlayer(entry.actorId);
+      // 段里**不嵌空格**：DOM 那边靠 .log-entry 的 flex gap，纯文本版靠 logText
+      // 的 join(' ')。把空格写进文案只会让纯文本版出现双空格
       const segments = fromFoe
         ? [seg('unit', `【${entry.actorId ? unitName(entry.actorId) : '未知'}】`), seg('skill', skillLabel)]
         : [seg('cast', '咏唱'), seg('skill', skillLabel ? `【${skillLabel}】` : '')];
@@ -74,7 +78,15 @@ export function logRows(entry, resolve = {}) {
       segments.push(seg('unit-word', '伤害'));
       if (crit) segments.push(seg('sfx', '（暴击！）'));
       if (entry.lethal === true) segments.push(seg('sfx', '（击杀）'));
-      return [{ kind: crit ? 'crit' : 'damage', icon: crit ? LOG_ICONS.crit : LOG_ICONS.damage, segments }];
+      /**
+       * 图标带方向：★ 我打出去、⌁ 打到我身上。光靠颜色分不了那么快，
+       * 而“这行是不是在说我挨打”是战斗日志里最该一眼分出的事。
+       */
+      return [{
+        kind: crit ? 'crit' : 'damage',
+        icon: crit ? LOG_ICONS.crit : fromFoe ? LOG_ICONS.foe : LOG_ICONS.me,
+        segments,
+      }];
     }
 
     case 'heal': {
@@ -121,19 +133,35 @@ export function logRows(entry, resolve = {}) {
 /**
  * 造一个"按当前战场解析名字"的 resolver 工厂。
  * 两个屏幕共用它 —— 各自写一份的话，早晚会一边能查到技能名一边查不到。
+ *
+ * ⚠️ 内部带一层**累积缓存**：日志比战场活得久。战斗结算后
+ * `state.monsters` 已经清空（界面顶部会显示"敌方 0 / 0"），而日志还要继续显示
+ * 那几行伤害 —— 只查当前快照就会退化成把内部 id 直接印给玩家
+ * （实测：`【mon.shadow.reaver.t1#0】吞噬 击中你！`）。
+ * 缓存有上限，不会无限长。仍然不改"日志只存 id"这条原则。
  */
+const NAME_CACHE_LIMIT = 400;
 export function createLogResolver({ getSkills = null, getBuffs = null } = {}) {
+  const seen = new Map();
   return (snapshot) => {
-    const names = new Map();
-    if (snapshot.player) names.set(snapshot.player.id, snapshot.player.name);
-    for (const m of snapshot.monsters ?? []) names.set(m.id, m.name);
+    const remember = (id, name) => {
+      if (typeof id !== 'string' || typeof name !== 'string' || name === '') return;
+      if (seen.size >= NAME_CACHE_LIMIT && !seen.has(id)) {
+        // 满则丢最旧：Map 保持插入序，firstKey 即最早记到的那个
+        const firstKey = seen.keys().next().value;
+        if (firstKey !== undefined) seen.delete(firstKey);
+      }
+      seen.set(id, name);
+    };
+    if (snapshot?.player) remember(snapshot.player.id, snapshot.player.name);
+    for (const m of snapshot?.monsters ?? []) remember(m.id, m.name);
     const skills = getSkills?.() ?? null;
     const buffs = getBuffs?.() ?? null;
     return {
-      unitName: (id) => names.get(id) ?? String(id ?? '未知'),
+      unitName: (id) => seen.get(id) ?? String(id ?? '未知'),
       skillName: (id) => skills?.get(id)?.name ?? String(id ?? ''),
       buffName: (id) => buffs?.get(id)?.name ?? String(id ?? ''),
-      isPlayer: (id) => id === snapshot.player?.id,
+      isPlayer: (id) => id === snapshot?.player?.id,
     };
   };
 }

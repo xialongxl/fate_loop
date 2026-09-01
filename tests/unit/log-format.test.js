@@ -28,6 +28,22 @@ const r = resolve({
 const text = (entry) => logText(entry, r);
 
 describe('logRows / logText', () => {
+  /** 图标必须分方向：“这行是不是在说我挨打”是日志里最该一眼分出的事 */
+  it('图标带方向：★ 我打出去、⌁ 打到我身上', () => {
+    const mine = logRows({ t: 1, kind: 'damage', actorId: 'player', targetId: 'e1', amount: 5 }, r)[0];
+    const theirs = logRows({ t: 1, kind: 'damage', actorId: 'e1', targetId: 'player', amount: 5 }, r)[0];
+    expect(mine.icon).toBe('★');
+    expect(theirs.icon).toBe('⌁');
+  });
+
+  /** 空格由排版给（DOM 用 flex gap、纯文本用 join），文案段里不嵌空格 */
+  it('纯文本版单空格分隔，不出现双空格', () => {
+    const line = text({ t: 1, kind: 'damage', actorId: 'e1', targetId: 'player', skillId: 'blade.jab', amount: 5 }, r);
+    expect(line).toBe('【骤雷哨卫】 突刺 击中你！造成 5 伤害');
+    expect(line).not.toContain('  ');
+    expect(text({ t: 1, kind: 'damage', actorId: 'player', targetId: 'e1', skillId: 'blade.jab', amount: 5 }, r)).not.toContain('  ');
+  });
+
   it('我方伤害：咏唱【技能】 → 目标 造成 N 伤害', () => {
     const line = text({ t: 1000, kind: 'damage', actorId: 'player', targetId: 'e1', skillId: 'blade.jab', amount: 204 });
     expect(line).toBe('咏唱 【突刺】 → 骤雷哨卫 造成 204 伤害');

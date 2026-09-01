@@ -12,8 +12,10 @@ import {
   describeGear,
   enhanceCost,
   enhanceGear,
+  expectedRarityAtFloor,
   gearScore,
   rarityOf,
+  rarityWeightsAtFloor,
   rollEquipment,
   salvageValue,
   slotKind,
@@ -21,7 +23,7 @@ import {
 } from '../../src/core/equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from '../../src/core/loot.js';
 import { derivePlayerStats, addPermanentBonus, permanentBonusOf, recalcPlayer } from '../../src/core/derived.js';
-import { EQUIP_SLOTS, ENHANCE_MAX, GROWTH_PER_LEVEL, RARITIES } from '../../src/core/constants.js';
+import { EQUIP_SLOTS, ENHANCE_MAX, GROWTH_PER_LEVEL, LOOT_RARITY_CURVE, RARITIES } from '../../src/core/constants.js';
 import { createPlayer } from '../../src/core/initialState.js';
 import { totalExpForLevel } from '../../src/core/progression.js';
 
@@ -133,6 +135,73 @@ describe('装备生成', () => {
   it('缺少 idSuffix 时抛错，而不是生成重复 id', () => {
     expect(() => rollEquipment({ rng: mulberry32(1), floorNumber: 1, idSuffix: '' })).toThrow();
     expect(() => rollEquipment({ rng: mulberry32(1), floorNumber: 1 })).toThrow();
+  });
+});
+
+/**
+ * P0：品质权重的层数曲线。
+ *
+ * 这条守卫守的是一个「不报错、不变红、只是后期没得玩」的缺陷：
+ * 旧实现只压制低档权重，高档权重是常数 ⇒ 40 层以后捡到传说的概率与第 1 层一样，
+ * 装备成长停住。单看一次抽样看不出来，所以直接对「期望」下断言。
+ */
+describe('品质权重随层数抬升（P0 回归）', () => {
+  it('第 1 层就是基准分布（改动不回头弄坏开局）', () => {
+    const weights = rarityWeightsAtFloor(1);
+    expect(weights.map((w) => w.weight)).toEqual(RARITIES.map((r) => r.weight));
+  });
+
+  it('品质下标 ≥2 的权重随层数单调不降，封顶前严格上升', () => {
+    // progress = min(cap, (floor-1)/rampFloor)，所以封顶发生在第 rampFloor×cap+1 层
+    const flatFrom = LOOT_RARITY_CURVE.rampFloor * LOOT_RARITY_CURVE.progressCap + 1;
+    for (let floor = 2; floor <= 160; floor += 1) {
+      const prev = rarityWeightsAtFloor(floor - 1);
+      const now = rarityWeightsAtFloor(floor);
+      for (let i = 2; i < now.length; i += 1) {
+        expect(now[i].weight).toBeGreaterThanOrEqual(prev[i].weight);
+      }
+      const top = now.length - 1;
+      // 到封顶（progressCap）后曲线钢平，这是设计决定而不是回归：
+      // 无尽段还要往上跑 100+ 层，全靠 mult 与 √层数继续拉开，不靠概率继续送。
+      if (floor <= flatFrom) expect(now[top].weight).toBeGreaterThan(prev[top].weight);
+      else expect(now[top].weight).toBe(prev[top].weight);
+    }
+  });
+
+  it('低档只降不升（高档的相对占比从两边同时挣出来）', () => {
+    for (let floor = 1; floor <= 200; floor += 1) {
+      const weights = rarityWeightsAtFloor(floor);
+      expect(weights[0].weight).toBeLessThanOrEqual(RARITIES[0].weight);
+      expect(weights[1].weight).toBeLessThanOrEqual(RARITIES[1].weight);
+    }
+  });
+
+  it('品质期望随层数上升（旧实现下这条在第 44 层后平掉 —— 就是那个 bug）', () => {
+    const marks = [1, 10, 25, 45, 90];
+    const values = marks.map((f) => expectedRarityAtFloor(f));
+    for (let i = 1; i < values.length; i += 1) {
+      expect(values[i]).toBeGreaterThan(values[i - 1]);
+    }
+    // 封顶前的增量不能小于 1 个档位：否则“后期装备不再变好”会以另一种形式回来
+    expect(values[values.length - 1]).toBeGreaterThan(values[0] + 1);
+    // 封顶后保持平（设计决定）但不回退：无尽段靠 mult 梯子与 √层数继续拉开
+    expect(expectedRarityAtFloor(300)).toBe(expectedRarityAtFloor(91));
+  });
+
+  it('权重表不消费随机数：同一层反复取表逐项相等', () => {
+    expect(rarityWeightsAtFloor(37)).toEqual(rarityWeightsAtFloor(37));
+  });
+
+  it('抽样与权重表同向：深层同一批流上均值更高', () => {
+    const meanAt = (floor) => {
+      const rng = mulberry32(4242);
+      let sum = 0;
+      for (let i = 0; i < 400; i += 1) {
+        sum += rollEquipment({ rng, floorNumber: floor, idSuffix: `p.${i}` }).rarityIndex;
+      }
+      return sum / 400;
+    };
+    expect(meanAt(45)).toBeGreaterThan(meanAt(5));
   });
 });
 

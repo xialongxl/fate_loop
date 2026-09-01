@@ -269,6 +269,28 @@ export const RARITIES = Object.freeze([
   { id: 'legend', name: '传说', mult: 6.0, cls: 'q5', weight: 7, affixMax: 5, orbSlots: 3 },
 ]);
 
+/**
+ * 掉落品质随层数抬升的曲线（P0）。修的是一个真 bug：
+ * 旧 `rollRarityIndex` 只用层数**压制低档**，高档权重是常数 ⇒
+ * 「层数只让你更少捡到破烂，并不会让你更容易捡到传说」，
+ * 40 层以后装备成长基本停住 —— demo/scale-curve.html 里第 40 层边际鼓包的代码根源。
+ *
+ * 语义：
+ *  - 低两档（破损/普通）按 `lowSuppressStep` 逐段压制（沿用旧值，那部分行为不变）
+ *  - 高档（下标 ≥2）按 `(1 + tierLift) ** (progress * (index - 1))` 抬升，
+ *    档越高抬得越狠 —— 于是深度同时买断低档与打开高档
+ *  - 第 `rampFloor` 层吃满 progress=1，之后继续按同一速率涨到 `progressCap`
+ *    （无尽段还有 100+ 层可爬，不能一进无尽就把曲线钉死）
+ */
+export const LOOT_RARITY_CURVE = Object.freeze({
+  lowSuppressFloors: 4,
+  lowSuppressStep: 0.08,
+  lowSuppressCap: 0.9,
+  rampFloor: 45,
+  tierLift: 0.8,
+  progressCap: 2,
+});
+
 /** 装备词缀。注意：只有这四项，与伤害公式直接挂钩。 */
 export const AFFIXES = Object.freeze([
   { id: 'maxHp', name: '生命', suffix: '' },

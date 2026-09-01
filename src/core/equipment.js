@@ -20,6 +20,7 @@ import {
   ENHANCE_COST_RATE,
   ENHANCE_MAX,
   ENHANCE_STEP_MUL,
+  LOOT_RARITY_CURVE,
   RARITIES,
   SALVAGE_BASE,
 } from './constants.js';
@@ -49,15 +50,41 @@ function slotKind(slot) {
   return 'accessory';
 }
 
-/** 按权重挑品质。楼层越深，低品质权重被压制。 */
-function rollRarityIndex(rng, floorNumber) {
-  // 每 4 层把「破损/普通」的权重各砍 8%，高品质相对占比自然上升。
-  const suppression = Math.min(0.9, Math.floor(Math.max(1, floorNumber) / 4) * 0.08);
-  const weighted = RARITIES.map((r, index) => ({
+/**
+ * 某一层的品质权重表（纯函数，不消费随机数）。
+ *
+ * 单独导出是为了让测试与 `npm run growth:report` 能直接拿“期望”做-guard，
+ * 而不必去猜 rollRarityIndex 的内部。“改曲线”必须先能看见曲线，否则调参
+ * 只能靠手感（上一版就是这么把曲线调成“40 层后不再变好”的）。
+ */
+export function rarityWeightsAtFloor(floorNumber) {
+  const floor = Math.max(1, Math.floor(floorNumber) || 1);
+  const { lowSuppressFloors, lowSuppressStep, lowSuppressCap, rampFloor, tierLift, progressCap } =
+    LOOT_RARITY_CURVE;
+
+  const suppression = Math.min(lowSuppressCap, Math.floor(floor / lowSuppressFloors) * lowSuppressStep);
+  const progress = Math.min(progressCap, (floor - 1) / rampFloor);
+
+  return RARITIES.map((rarity, index) => ({
     index,
-    weight: index <= 1 ? r.weight * (1 - suppression) : r.weight,
+    weight:
+      index <= 1
+        ? rarity.weight * (1 - suppression)
+        : rarity.weight * (1 + tierLift) ** (progress * (index - 1)),
   }));
-  return rng.pickWeighted(weighted).index;
+}
+
+/** 该层品质分布的期望下标（供报告与测试用；与掉落本身同一张表，不会漂）。 */
+export function expectedRarityAtFloor(floorNumber) {
+  const weights = rarityWeightsAtFloor(floorNumber);
+  const total = weights.reduce((sum, w) => sum + w.weight, 0);
+  if (total <= 0) return 0;
+  return weights.reduce((sum, w) => sum + w.weight * w.index, 0) / total;
+}
+
+/** 按权重挑品质。层数既压制低档、也抬升高档（见 LOOT_RARITY_CURVE）。 */
+function rollRarityIndex(rng, floorNumber) {
+  return rng.pickWeighted(rarityWeightsAtFloor(floorNumber)).index;
 }
 
 /**

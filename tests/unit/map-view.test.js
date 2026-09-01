@@ -18,6 +18,7 @@ import {
   createViewState,
   resetView,
   userScalePerPx,
+  visibleUserSize,
   zoomAt,
 } from '../../src/ui/map/viewState.js';
 import { ZOOM_MAX, ZOOM_MIN } from '../../src/core/constants.js';
@@ -111,30 +112,56 @@ describe('zoomAt：锚点在屏幕上不动', () => {
 describe('clampView：不许把地图拖进虚空', () => {
   it('内容比视口小时居中（小图停在角落看着像"地图丢了"）', () => {
     const view = createViewState();
-    view.zoom = 0.5; // 内容 592×784 缩到 296×392，比视口小
+    view.zoom = 0.5;
     view.offsetX = -200;
     view.offsetY = -300;
-    clampView(view, 592, 784);
-    expect(view.offsetX).toBeCloseTo((592 - 296) / 2, 6);
+    clampView(view, 592, 784, { width: 1323, height: 784 });
+    expect(view.offsetX).toBeCloseTo((1323 - 296) / 2, 6);
     expect(view.offsetY).toBeCloseTo((784 - 392) / 2, 6);
   });
 
   it('内容比视口大时，最多拖到边缘对齐（不许露出空白边）', () => {
     const view = createViewState();
     view.zoom = 2;
+    const viewport = { width: 592, height: 784 };
     view.offsetX = 999;
-    clampView(view, 592, 784);
+    clampView(view, 592, 784, viewport);
     expect(view.offsetX).toBe(0); // 左边缘贴住
     view.offsetX = -9999;
-    clampView(view, 592, 784);
+    clampView(view, 592, 784, viewport);
     expect(view.offsetX).toBe(592 - 1184); // 右边缘贴住
   });
 
-  it('拿不到内容尺寸时原样返回（jsdom 没有 viewBox.baseVal 也不能炸）', () => {
+  /**
+   * 探针量出来的真事故：拿 viewBox 尺寸当视口时，X 轴永远算“内容比视口小”
+   * ⇒ 每次都强制居中 ⇒ 刚算好的缩放锚点被抹平。拿不到就**不钉**。
+   */
+  it('拿不到真实可见区时不钉（错钉比不钉坑：它会静默抵消对焦）', () => {
     const view = createViewState();
-    view.offsetX = -1234;
-    clampView(view, NaN, undefined);
-    expect(view.offsetX).toBe(-1234);
+    view.zoom = 2;
+    view.offsetX = -4242;
+    clampView(view, 592, 784, null);
+    expect(view.offsetX).toBe(-4242);
+    clampView(view, 592, 784, { width: NaN, height: 784 });
+    expect(view.offsetX).toBe(-4242);
+    clampView(view, NaN, 784, { width: 592, height: 784 });
+    expect(view.offsetX).toBe(-4242);
+  });
+
+  it('visibleUserSize 用 CTM 把像素可见区换算成 user 尺寸', () => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    // 实测环境：viewBox 592×784 落在 916×543px 画布上 ⇒ 1 user = 0.6926 px
+    svg.getScreenCTM = () => ({ a: 0.6926, d: 0.6926 });
+    Object.defineProperty(svg, 'clientWidth', { value: 916, configurable: true });
+    Object.defineProperty(svg, 'clientHeight', { value: 543, configurable: true });
+    const size = visibleUserSize(svg);
+    expect(size.width).toBeCloseTo(916 / 0.6926, 1);   // ≈ 1323：比整个世界还宽
+    expect(size.height).toBeCloseTo(543 / 0.6926, 1); // ≈ 784
+  });
+
+  it('没有 CTM 时 visibleUserSize 返回 null（于是 clamp 自动跳过）', () => {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    expect(visibleUserSize(svg)).toBeNull();
   });
 });
 
@@ -169,7 +196,7 @@ describe('视图状态仍是"可丢弃"的（裁决 5）', () => {
   it('resetView 把三个量归零，缩放/钳制都不影响它', () => {
     const view = createViewState();
     zoomAt(view, 1.5, 100, 100);
-    clampView(view, 592, 784);
+    clampView(view, 592, 784, { width: 900, height: 600 });
     resetView(view);
     expect(view).toMatchObject({ offsetX: 0, offsetY: 0, zoom: 1 });
   });

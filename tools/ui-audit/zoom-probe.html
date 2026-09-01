@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<!--
+  缩放对焦探针（`npm run map:probe`）
+
+  为什么需要它：`zoomAt` 的数学有 14 例单测全绿，而用户说"还是没对焦"。
+  单测只能证明**公式对**，证明不了**接上去之后没被别的代码抵消** ——
+  而 jsdom 没有布局引擎，量不到"节点在屏幕上的位置"。所以这条必须用真浏览器量。
+
+  量的是唯一有意义的事：把光标钉在某个节点上滚一下，那个节点还在不在光标底下。
+
+  ⚠️ **这里一次 rAF 都不用**。无头 `--dump-dom` 跑在 `--virtual-time-budget` 下，
+  没有合成帧，`requestAnimationFrame` 的回调永远不触发 —— 探针会卡在第一个 await，
+  页面渲染正常但永远写不出结果（第一版就是这么"没拿到结果"的）。
+  布局靠 `getBoundingClientRect()` 自身强制 flush，同步就能量到。
+-->
+<html lang="zh">
+  <head><meta charset="utf-8" /><title>zoom probe</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      const write = (value) => {
+        const el = document.createElement('script');
+        el.type = 'application/json';
+        el.id = 'probe-json';
+        el.textContent = JSON.stringify(value).replace(/</g, '\u003c');
+        document.body.append(el);
+        window.__probe = value;
+      };
+
+      const result = { ok: false, cases: [], error: null, drag: null, measured: 0 };
+      try {
+        const { createApp } = await import('/src/main.js');
+        const app = await createApp({ root: document.querySelector('#app'), seed: 20240101 });
+        app.startNewRun(20240101);
+
+        const svg = document.querySelector('.map-svg');
+        const viewport = svg.querySelector('.map-viewport');
+        if (svg === null) throw new Error('没有 .map-svg（地图屏没渲染出来）');
+        const groups = [...svg.querySelectorAll('[data-node-id]')];
+        if (groups.length === 0) throw new Error('地图上没有节点');
+
+        const box = svg.getBoundingClientRect();
+        void svg.offsetWidth;
+
+        // 取屏幕位置最靠中间的那个节点当锚：边缘节点会被边缘行为合法地夹住，测不出对焦
+        const center = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        const pick0 = groups
+          .map((el) => {
+            const r = el.getBoundingClientRect();
+            return { el, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+          })
+          .sort((a, b) => Math.hypot(a.x - center.x, a.y - center.y) - Math.hypot(b.x - center.x, b.y - center.y))[0];
+
+        /**
+         * 每步**按 id 重新找元素**：地图重绘是 replaceChildren() 全量换，
+         * 握着手旧元素会拿到一个被摘离 DOM 的节点，它的 getBoundingClientRect()
+         * 永远返回 0,0 —— 上一轮拖拽量出“-426px”就是探针自己的错，不是代码的。
+         */
+        const pickId = pick0.el.getAttribute('data-node-id');
+        const nodeEl = () => svg.querySelector(`[data-node-id="${CSS.escape(pickId)}"]`);
+        /** 强制布局后读节点中心（读 rect 本身就会 flush layout） */
+        const rectOf = () => {
+          const el = nodeEl();
+          if (el === null) throw new Error(`节点 ${pickId} 不见了（重绘后没找回来）`);
+          const r = el.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        };
+
+        result.initialTransform = viewport.getAttribute('transform');
+        result.viewBox = svg.getAttribute('viewBox');
+        result.svgBox = { w: Math.round(box.width), h: Math.round(box.height) };
+
+        // 先缩后放：开局 fitToRevealed 可能已经顶到 ZOOM_MAX，直接"放大"会测到空操作（假绿）
+        for (const deltaY of [-100, -100, -100, 100, 100, 100, 100, 100]) {
+          const before = rectOf();
+          const at = { x: before.x, y: before.y }; // 光标就钉在这个节点上
+          const transformBefore = viewport.getAttribute('transform');
+          svg.dispatchEvent(new WheelEvent('wheel', {
+            deltaY, clientX: at.x, clientY: at.y, bubbles: true, cancelable: true,
+          }));
+          const after = rectOf();
+          const transformAfter = viewport.getAttribute('transform');
+          result.cases.push({
+            deltaY,
+            at,
+            after,
+            drift: Math.hypot(after.x - at.x, after.y - at.y),
+            // 已到缩放上下限 ⇒ 什么都没发生，这种"零漂移"不算通过
+            noOp: transformBefore === transformAfter,
+            transformBefore,
+            transformAfter,
+          });
+        }
+
+        /** 拖拽：指针走 (dx,dy)，节点必须也走 (dx,dy) —— 不是 1.5 倍 */
+        const dragFrom = rectOf();
+        const dragTransformBefore = viewport.getAttribute('transform');
+        const anchorPoint = { x: box.left + 8, y: box.bottom - 8 }; // 空白处按下，避免点中节点
+        const pointer = (type, x, y) => svg.dispatchEvent(
+          new PointerEvent(type, { clientX: x, clientY: y, bubbles: true, pointerId: 7 }),
+        );
+        pointer('pointerdown', anchorPoint.x, anchorPoint.y);
+        pointer('pointermove', anchorPoint.x + 60, anchorPoint.y + 40);
+        const dragTo = rectOf();
+        const dragTransformAfter = viewport.getAttribute('transform');
+        pointer('pointerup', anchorPoint.x + 60, anchorPoint.y + 40);
+        result.drag = {
+          expected: { x: 60, y: 40 },
+          actual: { x: dragTo.x - dragFrom.x, y: dragTo.y - dragFrom.y },
+          transformBefore: dragTransformBefore,
+          transformAfter: dragTransformAfter,
+        };
+
+        const real = result.cases.filter((c) => !c.noOp);
+        result.measured = real.length;
+        result.ok = real.length >= 3
+          && real.every((c) => c.drift <= 2)
+          && Math.abs(result.drag.actual.x - 60) <= 2
+          && Math.abs(result.drag.actual.y - 40) <= 2;
+      } catch (error) {
+        result.error = String(error?.stack ?? error);
+      }
+      write(result);
+    </script>
+  </body>
+</html>

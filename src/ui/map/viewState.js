@@ -63,26 +63,52 @@ export function zoomAt(view, factor, anchorX, anchorY) {
 }
 
 /**
- * 把视图夹回"不许拖进虚空"。
+ * 当前**可见区域**在 user 单位下的尺寸。
  *
- * 内容比视口小时**居中**（而不是允许留在角落）—— 一张比窗口还小的图被拖到
- * 边角上，看起来就像"地图丢了"。内容比视口大时，最多拖到边缘对齐。
- * @param {object} view
- * @param {number} contentWidth  viewBox 宽（user 单位）
- * @param {number} contentHeight viewBox 高
+ * 为什么不能直接拿 viewBox 尺寸当视口：viewBox 是“整个世界”，
+ * 而 `preserveAspectRatio` 默认会把它居中缩放进元素盒子 ——
+ * 实测 viewBox 592×784 落在 916×543 的画布上时，1 user = 0.6926 px，
+ * 于是可见区其实是 1323×784 user：**X 轴比整个世界还宽**。
+ * 拿 592 去 clamp 会把合法的锚点补偿当“拖出边界”夹掉（实测缩小漂 13~27px、
+ * 拖拽把节点拽到屏幕外）。
+ *
+ * @returns {{width:number, height:number}|null} 拿不到 CTM/尺寸时 null（宁可不钉）
  */
-export function clampView(view, contentWidth, contentHeight) {
+export function visibleUserSize(svg) {
+  const ctm = typeof svg?.getScreenCTM === 'function' ? svg.getScreenCTM() : null;
+  if (ctm === null || ctm === undefined) return null;
+  const pxW = svg.clientWidth ?? svg.getBoundingClientRect?.().width ?? 0;
+  const pxH = svg.clientHeight ?? svg.getBoundingClientRect?.().height ?? 0;
+  if (!Number.isFinite(ctm.a) || ctm.a === 0 || !Number.isFinite(ctm.d) || ctm.d === 0) return null;
+  if (pxW <= 0 || pxH <= 0) return null;
+  return { width: pxW / ctm.a, height: pxH / ctm.d };
+}
+
+/**
+ * 把视图夹回“不许把地图拖进虚空”。
+ *
+ * 内容比视口小时**居中**（一张比窗口还小的图停在角落，看着就像“地图丢了”）；
+ * 比视口大时最多拖到边缘对齐。
+ * @param {object} view
+ * @param {number} contentWidth  世界宽（viewBox 单位）
+ * @param {number} contentHeight 世界高
+ * @param {{width:number,height:number}} viewport **可见区**尺寸（同 user 单位）
+ */
+export function clampView(view, contentWidth, contentHeight, viewport = null) {
   if (!Number.isFinite(contentWidth) || !Number.isFinite(contentHeight)) return view;
+  // 拿不到真实可见区时**不钉**：用错尺寸（比如拿 viewBox 当视口）比不钉更坑 ——
+  // 它会静默抵消掉缩放锚点补偿，症状是“对焦修了但没修好”。
+  if (viewport === null || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height)) return view;
   const scaledW = contentWidth * view.zoom;
   const scaledH = contentHeight * view.zoom;
   view.offsetX =
-    scaledW <= contentWidth
-      ? (contentWidth - scaledW) / 2
-      : Math.min(0, Math.max(contentWidth - scaledW, view.offsetX));
+    scaledW <= viewport.width
+      ? (viewport.width - scaledW) / 2
+      : Math.min(0, Math.max(viewport.width - scaledW, view.offsetX));
   view.offsetY =
-    scaledH <= contentHeight
-      ? (contentHeight - scaledH) / 2
-      : Math.min(0, Math.max(contentHeight - scaledH, view.offsetY));
+    scaledH <= viewport.height
+      ? (viewport.height - scaledH) / 2
+      : Math.min(0, Math.max(viewport.height - scaledH, view.offsetY));
   return view;
 }
 

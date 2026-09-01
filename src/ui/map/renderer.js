@@ -5,7 +5,7 @@
  * 且能直接挂 ARIA 属性满足无障碍要求。
  */
 
-import { NODE_TYPE, ZOOM_MAX } from '../../core/constants.js';
+import { MAP_FIT_ZOOM_MAX, NODE_TYPE } from '../../core/constants.js';
 
 const CELL = 64;
 const RADIUS = 20;
@@ -90,7 +90,7 @@ export class MapRenderer {
 
     // 留 25% 边距，别让节点贴着画布边缘；上限收一档避免单点时放大到糊
     const zoom = Math.min(
-      ZOOM_MAX,
+      MAP_FIT_ZOOM_MAX,
       Math.max(0.5, Math.min(vbWidth / (maxX - minX), vbHeight / (maxY - minY)) * 0.75),
     );
     return {

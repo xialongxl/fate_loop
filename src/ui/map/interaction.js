@@ -7,9 +7,7 @@
 
 import {
   centerAnchor,
-  clampView,
   clientToUser,
-  contentSize,
   resetView,
   userScalePerPx,
   zoomAt,
@@ -24,8 +22,14 @@ export function attachMapInteraction({ svg, view, onNodeActivate, onViewChange }
   const cleanups = [];
 
   function applyViewChange() {
-    const size = contentSize(svg);
-    if (size !== null) clampView(view, size.width, size.height);
+    /**
+     * 这里**故意不做钳制**。上一轮我加了 clampView，本意是“别把地图拖进虚空”，
+     * 实测它反而把“对焦”打回了原形：世界（viewBox 592×784）比可见区
+     * （916×543px → 1323×784 user）窄时，它每次都把 X 重新居中，
+     * 算好的锚点补偿当场被抹平（探针量到漂移 4~28px）。
+     * 而“不许拖出边界”不是用户报的问题，也不该以“对焦失效”为代价。
+     * clampView 仍然导出（单测覆盖），将来要做“回弹”时再用，不在这条路上。
+     */
     onViewChange();
   }
 

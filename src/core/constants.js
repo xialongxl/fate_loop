@@ -132,6 +132,15 @@ export const ZOOM_MIN = 0.5;
 export const ZOOM_MAX = 2.0;
 
 /**
+ * 自动对准（fitToRevealed）允许的缩放上限。
+ *
+ * 为什么不直接用 ZOOM_MAX：开局只揭示三五个节点时，fit 会一路顶到 2.0，
+ * 于是玩家**往上滚滚轮完全没反应**（已经在上限）—— 实测探针里连续三下
+ * 放大全是空操作。自动对准要留出向上缩放的头等。
+ */
+export const MAP_FIT_ZOOM_MAX = 1.5;
+
+/**
  * 存档 schema 版本（裁决 7）。
  * v2：新增等级/经验/装备/背包/解锁技能（阶段 8），与 v1 不兼容。
  */

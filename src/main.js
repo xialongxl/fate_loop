@@ -63,6 +63,8 @@ import { createModsScreen } from './ui/screens/mods.js';
 import { derivePackIdentity } from './core/mods/sandbox/pack.js';
 import { createCodexScreen } from './ui/screens/codex.js';
 import { createHistoryScreen } from './ui/screens/history.js';
+import { AtmService } from './persistence/atm.js';
+import { ATM_DENOMS, atmRewardInfo, atmSummary, normalizeAtm } from './core/atm.js';
 
 const STATUS_LABELS = Object.freeze({
   [GAME_STATUS.IDLE]: '待开始',
@@ -127,6 +129,7 @@ export async function createApp({
   audio = new HowlerAudio(),
   packs,
   installPacks = null,
+  atm,
 } = {}) {
   if (root === null || root === undefined) {
     throw new Error('createApp 需要挂载点（#app）');
@@ -231,6 +234,18 @@ export async function createApp({
   await audio.init?.();
   engine.setAudioSinks({ live: audio, silent: nullAudio });
 
+  /**
+   * 跳局的 ATM 账（与 packs.js 同一条理由：它**永远在 vanilla 库里**，
+   * 不能跟着“装没装包”切命名空间 —— 否则装个包会让人以为存款没了）。
+   * 必须在 `flow` 之前读出来：商店面板与地图屏都要当场显示它。
+   */
+  const atmService =
+    atm === undefined
+      ? await new AtmService({
+          onPersistError: (message) => notify(message, 'danger'),
+        }).init()
+      : atm;
+
   const storageInfo = await saveService.init({
     // 包真生效 → 隔离库；包想生效但沙箱挂了 → 仍走隔离库（否则装包玩家会觉得档丢了）。
     // blockedPacks 为 0 时不能切：那是「根本没装包」，切库反而会把 vanilla 存档藏起来。
@@ -238,7 +253,7 @@ export async function createApp({
       packReport.loaded.length > 0 ||
       (packReport.sandboxError !== null && packReport.blockedPacks > 0),
   });
-  const flow = new GameFlow({ store, engine, pool, saveService, audio });
+  const flow = new GameFlow({ store, engine, pool, saveService, audio, atm: atmService });
 
   /**
    * 内容指纹（S1）。结果 = f(种子, 序列, 内容池)，所以分享种子必须连带分享指纹，
@@ -626,6 +641,7 @@ export async function createApp({
       onChange: (patch) => updateSettings(patch),
       onBack: () => router.back(getSnapshot().status === GAME_STATUS.IDLE ? SCREEN.MAIN_MENU : SCREEN.MAP),
       onResetData: () => void resetAllData(),
+      getAtm: () => (flow.hasAtm ? flow.atmAccount() : null),
     }),
 
     [SCREEN.CODEX]: createCodexScreen({
@@ -833,8 +849,57 @@ export async function createApp({
             })
             .join('')}
         </ul>
+        ${atmPanelHtml(state)}
         <div class="dialog-actions">
           <button type="button" data-action="close" class="btn-primary">离开</button>
+        </div>
+      `;
+    }
+
+    /**
+     * 前瞻性投资系统 · ATM（跳局存款机）。
+     *
+     * 三个不得不懂的取舍：
+     *  - 阶梯为空时**写“待定”**，不写“全部已解锁”（参考项目那种假报账最伤信任）
+     *  - 没注 ATM（测试/禁用环境）整块藏掉，而不是显示一个按不动的机器
+     *  - “存全部”是个整数额度快捷钮：核心允许任意正整数，面额只决定按钮
+     */
+    function atmPanelHtml(state) {
+      if (!flow.hasAtm) return '';
+      const account = normalizeAtm(flow.atmAccount());
+      const info = atmRewardInfo(account.total);
+      const depositButtons = ATM_DENOMS.map(
+        (amount) => `
+          <button type="button" class="btn-ghost" data-atm-deposit="${amount}"
+            ${state.fateShards < amount ? 'disabled' : ''}>存 ${formatNumber(amount)}</button>`,
+      ).join('');
+      const withdrawButtons = ATM_DENOMS.map(
+        (amount) => `
+          <button type="button" class="btn-ghost" data-atm-withdraw="${amount}"
+            ${account.balance < amount ? 'disabled' : ''}>取 ${formatNumber(amount)}</button>`,
+      ).join('');
+
+      return `
+        <h3>前瞻性投资系统 · ATM</h3>
+        <p class="atm-line">${escapeHtml(atmSummary(account))}</p>
+        <p class="atm-note">
+          存进来的碎片<strong>跳轮回保留</strong>，1:1 可取回；
+          没存的那部分死亡即清零。历史累计只增不减，取钱不会把累计取回去。
+        </p>
+        ${
+          info.pending
+            ? '<p class="atm-note is-pending">投资奖励阶梯待定 —— 现在存钱只有「保住它」这一个作用。</p>'
+            : ''
+        }
+        <div class="atm-row">
+          ${depositButtons}
+          <button type="button" class="btn-ghost" data-atm-deposit="all"
+            ${state.fateShards <= 0 ? 'disabled' : ''}>存全部 ${formatNumber(state.fateShards)}</button>
+        </div>
+        <div class="atm-row">
+          ${withdrawButtons}
+          <button type="button" class="btn-ghost" data-atm-withdraw="all"
+            ${account.balance <= 0 ? 'disabled' : ''}>取全部 ${formatNumber(account.balance)}</button>
         </div>
       `;
     }
@@ -849,6 +914,46 @@ export async function createApp({
           return;
         }
         renderShop();
+        return;
+      }
+
+      const depositAmount = event.target.getAttribute?.('data-atm-deposit');
+      if (depositAmount !== null && depositAmount !== undefined) {
+        const wallet = getSnapshot().fateShards;
+        const amount = depositAmount === 'all' ? wallet : Number(depositAmount);
+        const result = flow.depositToAtm(amount);
+        if (!result.ok) {
+          audio.play('ui.deny', {});
+          notify(
+            result.reason === 'insufficientShards' ? '手里的碎片不够这个数' : '存款没成交',
+            'warn',
+          );
+          renderShop();
+          return;
+        }
+        notify(`已存进 ATM ${result.spent} 枚（跳局保留）`, 'info');
+        renderShop();
+        renderAll();
+        return;
+      }
+
+      const withdrawAmount = event.target.getAttribute?.('data-atm-withdraw');
+      if (withdrawAmount !== null && withdrawAmount !== undefined) {
+        const account = normalizeAtm(flow.atmAccount());
+        const amount = withdrawAmount === 'all' ? account.balance : Number(withdrawAmount);
+        const result = flow.withdrawFromAtm(amount);
+        if (!result.ok) {
+          audio.play('ui.deny', {});
+          notify(
+            result.reason === 'insufficientBalance' ? '余额不够这个数' : '取款没成交',
+            'warn',
+          );
+          renderShop();
+          return;
+        }
+        notify(`取出 ${result.gained} 枚碎片（历史累计不变）`, 'info');
+        renderShop();
+        renderAll();
         return;
       }
 
@@ -1405,12 +1510,21 @@ export async function createApp({
   }
 
   async function resetAllData() {
-    const ok = await confirm('清空全部本地数据（4 个槽位、历史战绩、设置）？不可撤销。', {
-      confirmLabel: '全部清空',
-    });
+    const account = flow.hasAtm ? flow.atmAccount() : null;
+    const atmNote =
+      account === null || (account.balance === 0 && account.total === 0)
+        ? ''
+        : `，以及跳局 ATM 里的 ${String(account.balance)} 枚余额（累计 ${String(account.total)}）`;
+    const ok = await confirm(
+      `清空全部本地数据（4 个槽位、历史战绩、设置${atmNote}）？不可撤销。`,
+      { confirmLabel: '全部清空' },
+    );
     if (!ok) return;
     stopLoop();
     await saveService.clearAll();
+    // ATM 是跳局的钱，不在 saveService 的库里（它在 vanilla 命名空间的独立键）。
+    // 不一起清就是“说了全清其实留了一笔”，反过来不告诉玩家就清是偷。
+    if (flow.hasAtm) await atmService.clear();
     settings = defaultSettings();
     applyAudioSettings();
     store.replace(freshState(randomSeed()));
@@ -1544,6 +1658,11 @@ export async function createApp({
     /** 第三方包（S2）：清单、本次装配结果、沙箱宿主与注册表。 */
     packs: packService,
     packReport,
+    /** 跳局 ATM（投资系统）：服务与当时余额。测试要能拿到它才能验“跳局”二字。 */
+    atm: atmService,
+    get atmAccount() {
+      return flow.hasAtm ? flow.atmAccount() : null;
+    },
     get sandboxHost() {
       return sandboxHost;
     },

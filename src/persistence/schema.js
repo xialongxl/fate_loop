@@ -159,7 +159,7 @@ export function summarizeSave(record) {
 }
 
 /** 历史记录条目（规格 11.1）。 */
-export function createHistoryEntry(state, { outcome }) {
+export function createHistoryEntry(state, { outcome, atm = null }) {
   return {
     schemaVersion: SCHEMA_VERSION,
     seed: state.seed,
@@ -180,6 +180,13 @@ export function createHistoryEntry(state, { outcome }) {
     shardsFromMelt: state.metadata.shardsFromMelt ?? 0,
     lootFilterHash: filterHashOf(state.lootFilter),
     lootFilterSummary: filterSummary(state.lootFilter),
+    /**
+     * ATM 当时的跳局账。记的是**结算那一刻**的余额与累计：本作第一个跳局的
+     * 数值输入进来了，“同一种子”就得多一句“同一台 ATM”。不是防作弊（纯单机），
+     * 而是两人对不上账、或自己换个浏览器重跑时对不上时，得有地方查。
+     */
+    atmBalance: atm === null || atm === undefined ? null : atm.balance,
+    atmTotal: atm === null || atm === undefined ? null : atm.total,
     /** 本局是否先通关过再死在无尽里。历史界面据此标「通关后 · 无尽」。 */
     victoryAchieved: state.victoryAchieved === true,
     gcdSequence: [...state.player.gcdSequence],

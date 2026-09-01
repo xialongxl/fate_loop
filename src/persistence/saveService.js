@@ -417,12 +417,12 @@ export class SaveService {
     return { ok: true };
   }
 
-  /** 追加历史记录，保留最近 50 条。 */
-  async appendHistory(state, { outcome }) {
+  /** 追加历史记录，保留最近 50 条。`atm` 是当时的跳局账（可选，没 ATM 时为 null）。 */
+  async appendHistory(state, { outcome, atm = null }) {
     if (this.#adapter === null) await this.init();
     const existing = (await this.#adapter.get(HISTORY_KEY)) ?? [];
     const entry = {
-      ...createHistoryEntry(state, { outcome }),
+      ...createHistoryEntry(state, { outcome, atm }),
       ...this.#credentials(),
       recordedAt: Date.now(),
     };

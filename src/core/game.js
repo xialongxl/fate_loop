@@ -22,6 +22,7 @@ import { revealAround, revealInitial } from './map/reveal.js';
 import { encounterStream } from './prng.js';
 import { battleExpReward, buildUnlockTable, isSkillUnlocked, levelFromTotalExp } from './progression.js';
 import { addPermanentBonus, recalcPlayer, permanentBonusOf } from './derived.js';
+import { deposit as atmDeposit, normalizeAtm, withdraw as atmWithdraw } from './atm.js';
 import { hasMeaningfulProgress } from './runProgress.js';
 import { createEmptyEquipment, enhanceGear, salvageValue } from './equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from './loot.js';
@@ -42,13 +43,16 @@ export class GameFlow {
   #saveService;
   #audio;
   #unlockTable;
+  /** 跨局 ATM（没注入时 = 这台机器不存在，商店里也不得显示它的面板） */
+  #atm;
 
-  constructor({ store, engine, pool, saveService = null, audio = null }) {
+  constructor({ store, engine, pool, saveService = null, audio = null, atm = null }) {
     this.#store = store;
     this.#engine = engine;
     this.#pool = pool;
     this.#saveService = saveService;
     this.#audio = audio;
+    this.#atm = atm;
     /** 解锁表随内容池构建一次：序列屏、图鉴屏、战斗前的合法性清洗共用同一张表。
      *  把模组注册的流派一起传进去，否则新流派的技能会掉进 untagged 被排到最后。 */
     this.#unlockTable = buildUnlockTable(pool.skills, {
@@ -59,6 +63,55 @@ export class GameFlow {
   /** 技能解锁表（skillId → 解锁等级）。只读，UI 拿它渲染锁定态。 */
   get unlockTable() {
     return this.#unlockTable;
+  }
+
+  /** ATM 是否可用（没注入 = 不可用，商店得把那块面板整块藏掉）。 */
+  get hasAtm() {
+    return this.#atm !== null && this.#atm !== undefined;
+  }
+
+  /** 当前跨局账（内存快照，同步读）。 */
+  atmAccount() {
+    return this.#atm ? normalizeAtm(this.#atm.state) : normalizeAtm(null);
+  }
+
+  /**
+   * 存碎片进 ATM（局内 → 跳局）。
+   *
+   * 与商店购买同一条约束：先验钱包再扣，扣钱与记账一起完成 ——
+   * 半成的交易比不成交还糟（钱扣了没入账，或入账了钱还在）。
+   * 落盘是异步的且**失败要响**（AtmService 会把错误交给装配层），不能 `catch {}`。
+   */
+  depositToAtm(rawAmount) {
+    if (!this.hasAtm) return { ok: false, reason: 'noAtm' };
+    const wallet = this.#store.unsafeGetState().fateShards;
+    const result = atmDeposit(this.#atm.state, { amount: rawAmount, shards: wallet });
+    if (!result.ok) return result;
+
+    this.#store.update((draft) => {
+      draft.fateShards -= result.spent;
+      pushLog(draft, `存入 ATM ${result.spent} 枚碎片（余额 ${result.atm.balance}，历史累计 ${result.atm.total}）`);
+    });
+    void this.#atm.save(result.atm);
+    this.#autoSave();
+    this.#audio?.play('ui.purchase', {});
+    return { ok: true, spent: result.spent, atm: result.atm };
+  }
+
+  /** 从 ATM 取回本局（1:1 无损；历史累计不动 —— 那就是“无损”的定义）。 */
+  withdrawFromAtm(rawAmount) {
+    if (!this.hasAtm) return { ok: false, reason: 'noAtm' };
+    const result = atmWithdraw(this.#atm.state, { amount: rawAmount });
+    if (!result.ok) return result;
+
+    this.#store.update((draft) => {
+      draft.fateShards += result.gained;
+      pushLog(draft, `从 ATM 取出 ${result.gained} 枚碎片（余额 ${result.atm.balance}）`);
+    });
+    void this.#atm.save(result.atm);
+    this.#autoSave();
+    this.#audio?.play('ui.confirm', {});
+    return { ok: true, gained: result.gained, atm: result.atm };
   }
 
   /**
@@ -241,7 +294,7 @@ export class GameFlow {
 
     if (!won) {
       // 永久死亡（规格 6.4）：不回到探索模式
-      this.#saveService?.appendHistory(state, { outcome: 'death' }).catch(() => {});
+      this.#saveService?.appendHistory(state, { outcome: 'death', atm: this.atmAccount() }).catch(() => {});
       this.#saveService?.clearRun().catch(() => {});
       return { settled: true, won: false, outcome: 'death' };
     }
@@ -591,7 +644,7 @@ export class GameFlow {
     });
 
     this.#audio?.play('battle.victory', {});
-    this.#saveService?.appendHistory(state, { outcome: 'victory' }).catch(() => {});
+    this.#saveService?.appendHistory(state, { outcome: 'victory', atm: this.atmAccount() }).catch(() => {});
     this.#saveService?.clearRun().catch(() => {});
     return { ok: true, victory: true, floorNumber: floor };
   }

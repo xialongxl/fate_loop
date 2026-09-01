@@ -8,7 +8,7 @@
 import { SPEED_MODES } from '../../core/constants.js';
 import { formatPercent } from '../format.js';
 
-export function createSettingsScreen({ getSettings, onChange, onBack, onResetData }) {
+export function createSettingsScreen({ getSettings, onChange, onBack, onResetData, getAtm = null }) {
   const element = document.createElement('section');
   element.className = 'screen-settings';
   element.innerHTML = `
@@ -57,8 +57,11 @@ export function createSettingsScreen({ getSettings, onChange, onBack, onResetDat
 
     <div class="settings-group is-danger">
       <h3 class="settings-heading">数据</h3>
+      <!-- 跳局 ATM 账得在这里看见：它是全项目唯一不在某一局里的数值，
+           不显示的话“清空全部”会顺手抹掉一笔玩家看不见的钱。 -->
+      <p class="setting-note" data-slot="atm"></p>
       <p class="setting-note">
-        清空全部本地数据：4 个存档槽、历史战绩与设置。此操作不可撤销。
+        清空全部本地数据：4 个存档槽、历史战绩、设置，以及<strong>跳局 ATM 的余额与累计</strong>。此操作不可撤销。
       </p>
       <button type="button" class="btn-danger" data-act="reset">清空全部数据</button>
       <p class="setting-note" data-slot="storage"></p>
@@ -66,6 +69,7 @@ export function createSettingsScreen({ getSettings, onChange, onBack, onResetDat
   `;
 
   const volumeOut = element.querySelector('[data-out="volume"]');
+  const atmNote = element.querySelector('[data-slot="atm"]');
   const storageNote = element.querySelector('[data-slot="storage"]');
 
   function render() {
@@ -76,6 +80,15 @@ export function createSettingsScreen({ getSettings, onChange, onBack, onResetDat
     element.querySelector('[data-set="defaultSpeed"]').value = settings.defaultSpeed;
     element.querySelector('[data-set="autoStartBattle"]').checked = settings.autoStartBattle !== false;
     element.querySelector('[data-set="logLimit"]').value = String(settings.logLimit ?? 100);
+    // 跳局 ATM：只读一行。设置屏不许改它（钱只能在商店存/取），
+    // 但必须在这里看得见 —— 因为同一个屏下面就是“全部清空”按钮。
+    if (atmNote !== null && getAtm !== null) {
+      const account = getAtm();
+      atmNote.textContent =
+        account === null || account === undefined
+          ? '跳局投资（ATM）：本次不可用'
+          : `跳局投资（ATM）：余额 ${account.balance} · 历史累计 ${account.total}（存在本地，不随存档导出）`;
+    }
   }
 
   /** 设置存储信息（降级提示）。由 main 在 init 后注入一次。 */

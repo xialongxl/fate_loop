@@ -983,6 +983,40 @@ code {
   color: #9ce8b0;
 }
 
+/* ---- 商店里的 ATM（跳局投资）----
+   它在对话框里，所以宽度受 .dialog-box 限制（窄视口还会缩）：
+   按钮必须能折行，而且不能靠 nowrap 撑破面板。 */
+.atm-line {
+  margin: 2px 0 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.atm-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.atm-note.is-pending {
+  border-left: 2px solid var(--warn);
+  padding-left: 6px;
+  color: #f6d99a;
+}
+
+.atm-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.atm-row .btn-ghost {
+  white-space: nowrap;
+}
+
 /* 品质色：q0 破损 → q8 终焉，与 RARITIES[].cls 一一对应（九档，P1）。
    下标就是类名后缀 —— 常量里 `cls: q${index}` 推导，加档不会漏加类。
    三个新档的色都验过对比度（ui:audit 的 4.5:1 那一量）：

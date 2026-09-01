@@ -14,6 +14,25 @@
   --success: #3fb950;
   --warn: #d29922;
   --elite: #bc8cff;
+  /**
+   * 品质色九档（P1 扩档后统一成参考项目的梯子）。
+   *
+   * 为什么新开一组 token而不是改 --warn/--elite：那两个同时是「警示色」与
+   * 「精英节点标记色」，拿它们当品质色等于一个值伺候两个语义 —— 改一处撞两处
+   * （q3 曾用 --elite、q4 曾用 --warn，就是这个形状）。
+   *
+   * 梯子形状与参考项目一致：灰白 → 绿 → 蓝 → 紫 → 金 → 粉红 → 紫粉 → 玫红，
+   * 顶两档带发光。九档对三种底色的对比度实测 6.05~16.6:1（全部过 AA）。
+   */
+  --q0: #93a0b2;
+  --q1: #e9eef5;
+  --q2: #72d3a0;
+  --q3: #7db8ed;
+  --q4: #b09ae9;
+  --q5: #ebc269;
+  --q6: #ef8d9d;
+  --q7: #e6a0dd;
+  --q8: #f06c9e;
   --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --mono: "Cascadia Code", "SF Mono", Consolas, monospace;
 }
@@ -1090,19 +1109,20 @@ code {
 
 /* 品质色：q0 破损 → q8 终焉，与 RARITIES[].cls 一一对应（九档，P1）。
    下标就是类名后缀 —— 常量里 `cls: q${index}` 推导，加档不会漏加类。
-   三个新档的色都验过对比度（ui:audit 的 4.5:1 那一量）：
-   神话 #d59bff 8.2:1 · 不朽 #ffe9a8 14.4:1 · 终焉 #ff5d8f 5.9:1（@ #161b22）。
-   终焉故意用最刺目的绯而不是最亮的白：它是顶档，但“顶档一眼看出”靠的是稀有度叙事，
-   把颜色拉到发白会跟“已选中/强调”那类 UI 色撞车。 */
-.q0 { color: var(--text-dim); }
-.q1 { color: var(--text); }
-.q2 { color: #6cb6ff; }
-.q3 { color: var(--elite); }
-.q4 { color: var(--warn); }
-.q5 { color: #ff9b6a; }
-.q6 { color: #d59bff; }
-.q7 { color: #ffe9a8; }
-.q8 { color: #ff5d8f; }
+   颜色统一成参考项目的梯子（上一轮那套是我自己拼的，观感上“橙橙粉”连成一片）。
+   ⚠ 这一轮**只改颜色**：q2 精良变绿、q4 史诗变紫、q5 传说变金，
+   而 `RARITIES[].name`、`mult`、`weight` 一个没动。 */
+.q0 { color: var(--q0); }
+.q1 { color: var(--q1); }
+.q2 { color: var(--q2); }
+.q3 { color: var(--q3); }
+.q4 { color: var(--q4); }
+.q5 { color: var(--q5); }
+.q6 { color: var(--q6); }
+/* 顶两档发光：稀有度叙事靠的是“它在动”，而不是把颜色拉到发白
+   （拉到白会跟“已选中/强调”那类 UI 色撞车）。 */
+.q7 { color: var(--q7); text-shadow: 0 0 5px var(--q7); }
+.q8 { color: var(--q8); text-shadow: 0 0 7px var(--q8); }
 
 /* ---- 地图屏 ---- */
 .screen-map {

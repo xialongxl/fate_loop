@@ -25,7 +25,53 @@ export function createDialog(container) {
   let escapable = true;
   let previousFocus = null;
 
-  function open(html, { onClose = null, closeOnBackdrop: backdrop = true, wide = false, escapable: esc = true } = {}) {
+  /**
+   * 把第一个 h2 包成一条头部（eyebrow + 标题 + 右上 ✕ + 分隔线）。
+   *
+   * 为什么在 dialog.js 里做而不是改各对话框的标记：对话框有十几个，逐个改会漏；
+   * 而“对话框长什么样”应该只有一个地方说了算。
+   * 幂等：商店这类会重绘 innerHTML 的对话框要反复调它，不能注出两个 ✕。
+   *
+   * ✕ 用 `data-dialog-close` 而不是 `data-action="close"`：后者是对话框内容自己的
+   * 动作钮（“离开”“取消”），两者语义不同；而且 ✕ 靠**容器代理**接，
+   * 否则重绘一次监听就没了。
+   */
+  function decorateHeader(box, { eyebrow = null } = {}) {
+    if (box === null || box === undefined) return box;
+    const heading = box.querySelector('h2');
+    if (heading === null) return box;
+    let header = box.querySelector('.dialog-header');
+    if (header === null) {
+      header = document.createElement('div');
+      header.className = 'dialog-header';
+      box.insertBefore(header, heading);
+      header.append(heading);
+    }
+    heading.classList.add('dialog-title');
+
+    if (eyebrow !== null && header.querySelector('.dialog-eyebrow') === null) {
+      const tag = document.createElement('p');
+      tag.className = 'dialog-eyebrow';
+      tag.textContent = eyebrow;
+      header.insertBefore(tag, heading);
+    } else if (eyebrow === null) {
+      header.querySelector('.dialog-eyebrow')?.remove();
+    }
+
+    if (header.querySelector('[data-dialog-close]') === null) {
+      const closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'dialog-close';
+      closeBtn.setAttribute('data-dialog-close', '');
+      closeBtn.setAttribute('aria-label', '关闭');
+      closeBtn.title = '关闭（Esc）';
+      closeBtn.textContent = '×';
+      header.append(closeBtn);
+    }
+    return box;
+  }
+
+  function open(html, { onClose = null, closeOnBackdrop: backdrop = true, wide = false, escapable: esc = true, eyebrow = null } = {}) {
     onCloseHook = onClose;
     closeOnBackdrop = backdrop;
     escapable = esc;
@@ -35,12 +81,19 @@ export function createDialog(container) {
     const box = container.querySelector('.dialog-box');
     box.innerHTML = html;
 
+    /**
+     * 焦点目标在注头部**之前**算：否则初始焦点会被右上角的 ✕ 抢走，
+     * 现有对话框“打开就落在主操作/输入框”的行为会静默变样（也有测试绑着它）。
+     */
+    const focusTarget = box.querySelector('[data-autofocus], [data-action="close"], button, input, select');
+    decorateHeader(box, { eyebrow });
+
     const closeBtn = box.querySelector('[data-action="close"]');
     closeBtn?.addEventListener('click', () => close());
 
-    // 焦点落到首个可交互元素，键盘用户不需要先 Tab 一圈
-    const focusTarget = box.querySelector('[data-autofocus], [data-action="close"], button, input, select');
     focusTarget?.focus?.();
+    // 重绘型对话框（商店）每次写完 innerHTML 都要再注一次头部
+    box.decorateHeader = (options) => decorateHeader(box, options);
     return box;
   }
 
@@ -65,6 +118,11 @@ export function createDialog(container) {
   }
 
   container.addEventListener('click', (event) => {
+    // ✕ 走代理：商店这类对话框会重绘 innerHTML，在 open() 里一次性绑的监听会丢
+    if (event.target?.closest?.('[data-dialog-close]')) {
+      close();
+      return;
+    }
     if (event.target !== container) return;
     if (!closeOnBackdrop) return;
     close();
@@ -181,7 +239,7 @@ export function createDialog(container) {
     return box;
   }
 
-  return { open, close, isOpen, openSummary, element: container };
+  return { open, close, isOpen, openSummary, decorateHeader, element: container };
 }
 
 function fmt(value) {

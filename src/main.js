@@ -801,12 +801,15 @@ export async function createApp({
       return;
     }
 
-    const box = dialog.open('', { wide: true });
+    const box = dialog.open('', { wide: true, eyebrow: '功能面板' });
     renderShop();
 
     function renderShop() {
       const state = getSnapshot();
       const gearShelf = flow.getShopGear();
+      // 重绘会把头部整块抹掉（innerHTML 全量换），所以每次都要重新注一次；
+      // 不注的话商店买一次东西就“头部条突然消失”，而别的对话框还有。
+      const decorate = () => box.decorateHeader({ eyebrow: '功能面板' });
       box.innerHTML = `
         <h2 tabindex="-1">流浪货摊</h2>
         <p class="dialog-text shop-wallet">持有命运碎片<b>${formatNumber(state.fateShards)}</b>
@@ -864,6 +867,7 @@ export async function createApp({
           <button type="button" data-action="close" class="btn-primary">离开</button>
         </div>
       `;
+      decorate();
     }
 
     /**

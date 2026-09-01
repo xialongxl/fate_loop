@@ -477,6 +477,56 @@ describe('节点操作', () => {
     expect(box.querySelectorAll('.shop-section').length).toBe(3);
   });
 
+  it('对话框头部条：eyebrow + 标题 + ✕，重绘后不丢也不重复', async () => {
+    const shop = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.SHOP);
+    standOn(app, shop);
+    app.openShopDialog();
+    const box = q('.dialog-box');
+
+    const header = box.querySelector('.dialog-header');
+    expect(header, '头部条应在').not.toBeNull();
+    expect(header.querySelector('.dialog-eyebrow').textContent).toBe('功能面板');
+    expect(header.querySelector('.dialog-title').textContent).toBe('流浪货摊');
+    expect(header.querySelectorAll('[data-dialog-close]')).toHaveLength(1);
+    // 标题必须仍在头部里：dialog.js 是“把第一个 h2 搬进去”，不是复制一份
+    expect(box.querySelectorAll('h2')).toHaveLength(1);
+
+    // 重绘（买东西会重写整个 box.innerHTML）后头部还得在，而且不能攒出第二个 ✕
+    app.store.update((draft) => {
+      draft.fateShards = 500;
+    });
+    app.renderAll();
+    click(box.querySelector('[data-buy]'));
+    await tick();
+    expect(box.querySelector('.dialog-header')).not.toBeNull();
+    expect(box.querySelectorAll('[data-dialog-close]')).toHaveLength(1);
+  });
+
+  it('右上角 ✕ 真能关掉对话框（重绘后也不失效）', async () => {
+    const shop = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.SHOP);
+    standOn(app, shop);
+    app.openShopDialog();
+    const box = q('.dialog-box');
+    // 先买东西触发一次重绘：✕ 是代理接接的，重绘后必须仍然可用
+    app.store.update((draft) => {
+      draft.fateShards = 500;
+    });
+    click(box.querySelector('[data-buy]'));
+    await tick();
+    click(must('.dialog-box .dialog-close'));
+    expect(q('.app-dialog').hidden).toBe(true);
+  });
+
+  it('初始焦点不被 ✕ 抢走（头部是注进去的，顺序容易把焦点带偏）', async () => {
+    const shop = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.SHOP);
+    standOn(app, shop);
+    app.openShopDialog();
+    await tick();
+    const focused = document.activeElement;
+    expect(focused).not.toBeNull();
+    expect(focused.classList.contains('dialog-close')).toBe(false);
+  });
+
   it('事件：选择选项后节点被清理', () => {
     const node = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.EVENT);
     standOn(app, node);

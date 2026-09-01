@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>战斗日志 · 文字风格 Demo</title>
+<style>
+  /* 变量抄自 src/ui/styles.css，用游戏的眼睛看效果 */
+  :root {
+    --bg: #0d1117; --bg-raised: #161b22; --bg-inset: #0a0e14; --border: #2d333b;
+    --text: #d8dee9; --text-dim: #8b949e; --accent: #58a6ff; --accent-dim: #1f6feb;
+    --danger: #f85149; --success: #3fb950; --warn: #d29922; --elite: #bc8cff;
+    --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "Cascadia Code", "SF Mono", Consolas, monospace;
+    --fs: 13px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--fs); }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 9px 12px; margin-bottom: 12px;
+    background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; position: sticky; top: 0; z-index: 5; }
+  .bar .g { display: flex; gap: 4px; align-items: center; }
+  .bar .sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 3px; }
+  .bar label { font-size: 11px; color: var(--text-dim); }
+  button.seg { font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; background: var(--bg-inset);
+    color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; }
+  button.seg:hover { color: var(--text); border-color: var(--accent-dim); }
+  button.seg[aria-pressed="true"] { background: var(--accent-dim); color: #fff; border-color: var(--accent-dim); }
+  input[type=range] { width: 78px; accent-color: var(--accent); }
+  input[name=who] { font: inherit; font-size: 12px; width: 9em; padding: 3px 7px; background: var(--bg-inset);
+    color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+
+  /* ── 战斗界面骨架（照 battleScreen 的结构） ── */
+  .battle { background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .sides { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: start; margin-bottom: 12px; }
+  .side-title { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; letter-spacing: .04em; }
+  .unit { border: 1px solid var(--border); border-radius: 7px; padding: 9px 11px; background: var(--bg-inset); }
+  .unit .nm { font-size: 13px; font-weight: 600; display: flex; justify-content: space-between; align-items: baseline; }
+  .unit .nm .inf { font-family: var(--mono); font-size: 10px; color: var(--warn); }
+  .hpbar { height: 7px; margin: 6px 0 5px; border-radius: 4px; background: #20262e; overflow: hidden; }
+  .hpbar i { display: block; height: 100%; background: linear-gradient(90deg, var(--success), #2ea043); }
+  .unit.enemy .hpbar i { background: linear-gradient(90deg, var(--danger), #b62a23); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; }
+  .chip { font-size: 10px; font-family: var(--mono); padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-raised); }
+  .chip.is-buff { border-color: #2a5b3a; color: #9ce8b0; }
+  .chip.is-debuff { border-color: #52306b; color: #d7b3ff; }
+  .chip b { margin-left: 3px; color: var(--text); }
+  .vs { align-self: center; color: var(--text-dim); font-family: var(--mono); font-size: 11px; text-align: center; }
+  .stat { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-top: 5px; }
+  .stat b { color: var(--text); }
+
+  /* 参考图语法：图标 + 技能名 + 箭头 + 大数字 + 后缀 */
+  .s-ref .row { border-bottom: 0; padding: 1px 0; }
+  .s-ref .ico { flex: 0 0 14px; text-align: center; }
+  .s-ref .dmg .num, .s-ref .dmg .amt { color: #f6c177; }
+  .s-ref .crit .amt { color: var(--danger); font-weight: 700; }
+  .s-ref .crit { background: rgba(248,81,73,.07); }
+  .s-ref .fromfoe { color: #f0b8bd; }
+  .s-ref .fromfoe .amt { color: var(--danger); }
+  .s-ref .heal .amt { color: var(--success); }
+  .s-ref .sfx { color: var(--elite); }
+  .s-ref .amt { font-family: var(--mono); font-weight: 700; flex: 0 0 auto; }
+  /* 数字做成块：不上色也能一眼抓住建个事件（参考图里最醒目的就是那块红底数字） */
+  .s-ref .crit .amt { color: #fff; background: var(--danger); padding: 0 6px; border-radius: 4px; font-size: 1.08em; }
+  .s-ref .crit { border-left: 2px solid var(--danger); padding-left: 6px; background: rgba(248,81,73,.06); }
+  .s-ref .heal .amt { color: var(--success); }
+
+  /* ── 动效 ── 全部走 CSS animation：系统级“减少动态效果”能接管，
+     而 JS 逐帧改 transform 会绕过它（对前庭功能障碍的人是硬需求，不是美化） */
+  .battle { position: relative; }
+  /* 震的是**角色卡片**不是整块战斗面板：全屏震看久了眩且让人想抓住东西，
+     而卡片震恰好把视线引到“谁挨了这一下”上，信息反而更准 */
+  .unit.shake-s { animation: shake .16s linear; }
+  .unit.shake-m { animation: shake .24s cubic-bezier(.36,.07,.19,.97); }
+  .unit.shake-l { animation: shake-l .34s cubic-bezier(.36,.07,.19,.97); }
+  @keyframes shake { 10%,90%{transform:translate(-1px,0)} 20%,80%{transform:translate(2px,0)} 30%,50%,70%{transform:translate(-3px,0)} 40%,60%{transform:translate(3px,0)} }
+  @keyframes shake-l { 10%,90%{transform:translate(-2px,1px)} 20%,80%{transform:translate(5px,-1px)} 30%,50%,70%{transform:translate(-8px,2px)} 40%,60%{transform:translate(8px,-2px)} 100%{transform:translate(0,0)} }
+  .unit.hit { animation: hitflash .22s ease-out; }
+  @keyframes hitflash { 0% { background: rgba(248,81,73,.26); border-color: var(--danger); } 100% { background: var(--bg-inset); } }
+  .floaters { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+  .floater {
+    position: absolute; font-family: var(--mono); font-weight: 700; white-space: nowrap;
+    animation: rise .9s ease-out forwards;
+  }
+  .floater.n { color: #f6c177; font-size: 15px; }
+  .floater.c { color: #fff; background: var(--danger); padding: 1px 7px; border-radius: 4px; font-size: 24px; letter-spacing: .02em; }
+  .floater.h { color: var(--success); font-size: 15px; }
+  .floater.b { color: var(--elite); font-size: 13px; }
+  @keyframes rise { 0% { opacity: 0; transform: translateY(6px) scale(.7); } 18% { opacity: 1; transform: translateY(-4px) scale(1.12); } 32% { transform: translateY(-10px) scale(1); } 100% { opacity: 0; transform: translateY(-46px) scale(1); } }
+
+  /* ── 日志 ── */
+  .logwrap { border-top: 1px solid var(--border); padding-top: 10px; }
+  .log { list-style: none; margin: 0; padding: 0 2px; height: 52vh; overflow: hidden auto; font-size: var(--fs); }
+  .row { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; border-bottom: 1px dotted #21262d; }
+  .t { font-family: var(--mono); font-size: 10px; color: var(--text-dim); flex: 0 0 44px; text-align: right; }
+  .num { font-family: var(--mono); font-weight: 600; }
+  .skill { color: var(--accent); } .src { color: var(--text); } .dst { color: var(--text-dim); }
+  .hp { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+  .mark { flex: 0 0 12px; text-align: center; font-family: var(--mono); }
+  .row.beat { color: var(--text-dim); font-size: 11px; letter-spacing: .05em; border: 0; margin: 6px 0 3px; }
+  .row.beat::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--border); }
+
+  /* 战报：数值成列 + 累计 */
+  .s-report .row { display: grid; grid-template-columns: 44px 14px minmax(0,1fr) 62px; gap: 8px; }
+  .s-report .amt { text-align: right; }
+  .s-report .dmg .num { color: #f0b8bd; } .s-report .crit .num { color: var(--danger); }
+  .s-report .heal .num { color: var(--success); } .s-report .buff .num { color: var(--elite); }
+  .s-report .crit { background: rgba(248,81,73,.06); }
+
+  /* 打击：动词 + 抢行 */
+  /* 不能用负 margin 抢边：那会把容器撑宽，日志底下冒出一条横向滚动条 */
+  .s-punch .crit { padding: 5px 8px; margin: 3px 0; border-left: 2px solid var(--danger); border-bottom: 0;
+    background: linear-gradient(90deg, rgba(248,81,73,.17), transparent 72%); }
+  .s-punch .crit .num { color: #fff; background: var(--danger); padding: 0 5px; border-radius: 3px; }
+  .s-punch .heal .num { color: var(--success); } .s-punch .debuff .skill { color: var(--elite); }
+
+  /* 极简：聚合行 */
+  .s-tidy .row { border-bottom: 0; padding: 1px 0; }
+  .s-tidy .x { font-family: var(--mono); font-size: 10px; color: var(--text-dim); }
+  .s-tidy .dmg .num { color: #f0b8bd; } .s-tidy .crit .num { color: var(--danger); }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div class="g">
+      <label>日志写法</label>
+      <button class="seg" data-style="plain" aria-pressed="true">现状</button>
+      <button class="seg" data-style="report">战报</button>
+      <button class="seg" data-style="punch">打击</button>
+      <button class="seg" data-style="tidy">极简</button>
+      <button class="seg" data-style="ref">参考图语法</button>
+    </div>
+    <div class="sep"></div>
+    <div class="g">
+      <label>动效</label>
+      <button class="seg" id="fx" aria-pressed="true">开</button>
+      <label>强度</label><input type="range" id="fxi" min="1" max="3" value="2" />
+      <button class="seg" id="scale" aria-pressed="false">大数值（测 K/M/B/T）</button>
+    </div>
+    <div class="sep"></div>
+    <div class="g">
+      <button class="seg" id="play" aria-pressed="false">▶ 播放</button>
+      <button class="seg" id="reset">重置</button>
+      <label>速度</label><input type="range" id="speed" min="1" max="12" value="7" />
+    </div>
+    <div class="sep"></div>
+    <div class="g"><label>玩家名</label><input name="who" id="who" value="序列编织者" maxlength="12" /></div>
+    <div class="sep"></div>
+    <div class="g"><label>字号</label><input type="range" id="fs" min="11" max="18" value="13" /></div>
+  </div>
+
+  <div class="battle">
+    <div class="sides">
+      <div>
+        <div class="side-title">我方</div>
+        <div class="unit" id="me">
+          <div class="nm"><span class="who">序列编织者</span><span class="inf">∞ HP</span></div>
+          <div class="hpbar"><i style="width:100%"></i></div>
+          <div class="chips" id="me-chips"></div>
+          <div class="stat">累计输出 <b id="me-dealt">0</b> · 施放 <b id="me-cast">0</b> 次</div>
+        </div>
+      </div>
+      <div class="vs">对砍<br />1000 步</div>
+      <div>
+        <div class="side-title">敌方</div>
+        <div class="unit enemy" id="foe">
+          <div class="nm"><span>骤雷哨卫</span><span class="inf">∞ HP</span></div>
+          <div class="hpbar"><i style="width:100%"></i></div>
+          <div class="chips" id="foe-chips"></div>
+          <div class="stat">累计输出 <b id="foe-dealt">0</b> · 施放 <b id="foe-cast">0</b> 次</div>
+        </div>
+      </div>
+    </div>
+    <div class="logwrap"><ul class="log" id="log"></ul></div>
+    <div class="floaters" id="floaters" aria-hidden="true"></div>
+  </div>
+
+<script>
+'use strict';
+/* ============================================================
+ * 两个无限血单位对砍。刻意让内容高度重复 —— 措辞撑不撑得住，
+ * 只有在重复里才看得出来（一场只有三行的战斗怎么排版都好看）。
+ * 随机用固定种子的 LCG：刷新页面结果一致，便于逐字对比四种写法。
+ * ========================================================== */
+function lcg(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+const rnd = lcg(20260831);
+
+const ME = 'me';
+const FOE = 'foe';
+const SKILLS = {
+  me: [
+    { id: '突刺', cast: '刺出', verb: '劈', gcd: 2.4, power: 1.0, element: 'physical' },
+    { id: '裂隙', cast: '撕开', verb: '蚀', gcd: 2.4, power: 0.92, element: 'shadow', debuff: '虚空印记' },
+    { id: '崩解', cast: '引导', verb: '蚀穿', gcd: 3.2, power: 1.5, element: 'shadow', critBias: 0.25 },
+    { id: '血债', cast: '追索', verb: '追讨', gcd: 2.4, power: 1.15, element: 'shadow' },
+    { id: '虹吸', cast: '咏唱', verb: '汲取', gcd: 3.2, power: 0.7, element: 'shadow', selfHeal: 0.5 },
+  ],
+  foe: [
+    { id: '雷击', cast: '降下', verb: '击穿', gcd: 3.2, power: 1.1, element: 'lightning' },
+    { id: '弧光', cast: '挥出', verb: '扫', gcd: 2.4, power: 0.8, element: 'lightning' },
+    { id: '雷鸣', cast: '咆哮', verb: '震', gcd: 4.0, power: 1.6, element: 'lightning', critBias: 0.3, buff: '蓄雷' },
+  ],
+};
+
+/* ── 生成事件流（结构化，不是字符串 —— 这正是现状缺的东西） ── */
+const events = [];
+const cast = { me: 0, foe: 0 };
+const dealt = { me: 0, foe: 0 };
+/* 每方各自一条 readyAt 时间轴，谁先到点谁出手。
+ * 第一版这里写的是"全局 t + t <= nextReady[side]"，而每次出手都会把 t 推到
+ * 自己的 nextReady 上 ⇒ 条件恒成立 ⇒ 敌方一次都不会出手（demo 里累计输出 0）。 */
+const readyAt = { me: 0, foe: 0 };
+for (let step = 0; step < 1000; step += 1) {
+  const side = readyAt.me === readyAt.foe ? (rnd() < 0.5 ? ME : FOE) : readyAt.me < readyAt.foe ? ME : FOE;
+  const t = readyAt[side];
+  const pool = SKILLS[side];
+  const sk = pool[Math.floor(rnd() * pool.length)];
+  const crit = rnd() < (sk.critBias ?? 0.12);
+  const base = (side === ME ? 190 : 165) * sk.power * (0.9 + rnd() * 0.2);
+  const amount = Math.max(1, Math.round(base * (crit ? 1.85 : 1)));
+  const e = {
+    t: +t.toFixed(2),
+    kind: crit ? 'crit' : 'damage',
+    side,
+    skill: sk.id,
+    verb: sk.verb,
+    cast: sk.cast,
+    // 减伤%：参考图那行「(减伤:95.0%)」的信息密度很高 —— 玩家一眼看出
+    // "这 196 是打过折的"，不然他会以为对方基础伤害就只有 196
+    reduction: side === ME ? +(8 + rnd() * 6).toFixed(1) : +(12 + rnd() * 8).toFixed(1),
+    amount,
+    actor: side === ME ? '__ME__' : '骤雷哨卫',
+    target: side === ME ? '骤雷哨卫' : '__ME__',
+    total: (dealt[side] += amount),
+  };
+  if (sk.debuff && rnd() < 0.7) e.debuff = { name: sk.debuff, stacks: 1 + Math.floor(rnd() * 3) };
+  if (sk.buff && rnd() < 0.6) e.buff = { name: sk.buff, stacks: 1 + Math.floor(rnd() * 2) };
+  if (sk.selfHeal) e.heal = Math.round(amount * sk.selfHeal);
+  events.push(e);
+  cast[side] += 1;
+  readyAt[side] = +(t + sk.gcd).toFixed(2);
+  if (step % 40 === 39) events.push({ kind: 'beat', t, text: `${t.toFixed(1)}s · 已进行 ${step + 1} 次施放` });
+}
+const TOTAL = { me: dealt.me, foe: dealt.foe };
+
+/* ── 四种写法 ───────────────────────────────────────────── */
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const fmt = (n) => n.toLocaleString('zh-CN');
+
+/* 数值缩写：K / M / B / T 阶梯，阈值 1e3。
+ * 工具条上那个"大数值"开关用来判断缩写好不好看 —— 本作正常伤害是百~千级，
+ * 不放大根本看不到 M/T 是什么样子。 */
+const UNITS = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']];
+let SCALE = 1;
+function big(n) {
+  const v = Math.round(n * SCALE);
+  for (const [div, name] of UNITS) {
+    if (v >= div) {
+      const s = (v / div).toFixed(2);
+      return `${/\.?00$/.test(s) ? s.slice(0, -3) : s}${name}`;
+    }
+  }
+  return fmt(v);
+}
+
+/* ── 动效引擎：飘字 + 震屏 + 受击闪 ─────────────────────
+ * 三条原则：
+ *  1. 纯表现，不回写任何状态（与 logLimit / 聚合同一条原则）
+ *  2. 只给“值得强调”的事件：普通命中不震屏，暴击/被击才震
+ *  3. 有预算：飘字最多同时 6 个，超了丢旧的 —— 4x 速度下不会堆到卡死
+ * MAX 模式本来就是同步跑完、不逐帧渲染，所以动效自然不生效。 */
+const floaters = () => document.getElementById('floaters');
+let fxOn = true;
+const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const fxLive = () => fxOn && !reduced();
+/** 震**受击那张卡片**，不震整块面板 */
+function shake(side, level) {
+  if (!fxLive()) return;
+  const el = document.getElementById(side === ME ? 'me' : 'foe');
+  const cls = ['shake-s', 'shake-m', 'shake-l'][Math.min(2, Math.max(0, level - 1))];
+  el.classList.remove('shake-s', 'shake-m', 'shake-l');
+  void el.offsetWidth; // 重启动画：不加这行连续暴击不会重新震
+  el.classList.add(cls);
+}
+function pop(side, text, kind) {
+  if (!fxLive()) return;
+  const host = floaters();
+  if (host.children.length >= 6) host.removeChild(host.firstElementChild);
+  const card = document.getElementById(side === ME ? 'me' : 'foe');
+  const box = card.getBoundingClientRect();
+  const wrap = document.querySelector('.battle').getBoundingClientRect();
+  const s = document.createElement('span');
+  s.className = 'floater ' + kind;
+  s.textContent = text;
+  s.style.left = `${Math.round(box.left - wrap.left + box.width * (0.25 + Math.random() * 0.45))}px`;
+  s.style.top = `${Math.round(box.top - wrap.top + 26)}px`;
+  /* 飘字自己用随机偏移：这是纯装饰，不参与任何逻辑，所以不影响确定性 */
+  host.appendChild(s);
+  s.addEventListener('animationend', () => s.remove());
+}
+function hitFlash(side) {
+  if (!fxLive()) return;
+  const card = document.getElementById(side === ME ? 'me' : 'foe');
+  card.classList.remove('hit');
+  void card.offsetWidth;
+  card.classList.add('hit');
+}
+function react(e) {
+  if (e.kind === 'beat') return;
+  const targetSide = e.side === ME ? FOE : ME;   // 挨打的那一方
+  if (e.kind === 'crit') { pop(targetSide, `◆ ${big(e.amount)}`, 'c'); shake(targetSide, 3); hitFlash(targetSide); return; }
+  if (e.side === FOE) { pop(ME, `−${big(e.amount)}`, 'n'); shake(ME, 2); hitFlash(ME); return; }
+  pop(FOE, `−${big(e.amount)}`, 'n');
+  shake(FOE, 1);                                // 我方普通命中：轻震一下就够了
+  hitFlash(FOE);
+  if (e.heal) pop(ME, `+${big(e.heal)}`, 'h');
+  if (e.debuff) pop(FOE, `✧${esc(e.debuff.name)}`, 'b');
+  if (e.buff) pop(FOE, `✦${esc(e.buff.name)}`, 'b');
+}
+const who = (name) => (name === '__ME__' ? (document.getElementById('who').value.trim() || '序列编织者') : name);
+const meName = () => document.getElementById('who').value.trim() || '序列编织者';
+
+function plain(e) {
+  if (e.kind === 'beat') return `<li class="row beat"><span class="t"></span><span>${esc(e.text)}</span></li>`;
+  const a = esc(who(e.actor)), b = esc(who(e.target));
+  let s = `${a} 对 ${b} 造成 ${e.amount} 点伤害${e.kind === 'crit' ? '（暴击）' : ''}`;
+  if (e.debuff) s += `，${esc(e.target === '__ME__' ? a : b)} 获得了 ${esc(e.debuff.name)}`;
+  if (e.buff) s += `，${esc(b)} 获得了 ${esc(e.buff.name)}`;
+  if (e.heal) s += `，${esc(a)} 恢复了 ${e.heal} 点生命`;
+  return `<li class="row"><span class="t">${e.t.toFixed(2)}s</span><span>${s}</span></li>`;
+}
+
+function report(e) {
+  if (e.kind === 'beat') return `<li class="row beat"><span class="t"></span><span></span><span>${esc(e.text)}</span><span></span></li>`;
+  const cls = e.kind === 'crit' ? 'crit' : 'dmg';
+  const mark = e.kind === 'crit' ? '◆' : '−';
+  const me = e.side === ME;
+  const head = me
+    ? `<span class="skill">${esc(e.skill)}</span> <span class="dst">→ ${esc(who(e.target))}</span>`
+    : `<span class="src">${esc(e.actor)}</span> <span class="skill">${esc(e.skill)}</span> <span class="dst">→ 你</span>`;
+  const extra = e.debuff ? ` <span class="hp">✧${esc(e.debuff.name)}×${e.debuff.stacks}</span>`
+    : e.buff ? ` <span class="hp">✦${esc(e.buff.name)}×${e.buff.stacks}</span>` : '';
+  return `<li class="row ${cls}"><span class="t">${e.t.toFixed(2)}s</span><span class="mark">${mark}</span>` +
+    `<span>${head}${extra}</span><span class="amt num">${fmt(e.amount)}</span></li>`;
+}
+
+function punch(e) {
+  if (e.kind === 'beat') return `<li class="row beat"><span>${esc(e.text)}</span></li>`;
+  const me = e.side === ME;
+  const target = me ? `<span class="dst">${esc(who(e.target))}</span>` : '<span class="src">你</span>';
+  const head = me
+    ? `<span class="skill">${esc(e.skill)}</span> ${esc(e.verb)} ${target}`
+    : `<span class="src">${esc(e.actor)}</span> 的 <span class="skill">${esc(e.skill)}</span> ${esc(e.verb)} ${target}`;
+  const cls = e.kind === 'crit' ? 'crit' : 'dmg';
+  let tail = '';
+  if (e.debuff) tail += ` <span class="hp">被 ${esc(e.debuff.name)} 侵蚀 ×${e.debuff.stacks}</span>`;
+  if (e.buff) tail += ` <span class="hp">蓄起 ${esc(e.buff.name)} ×${e.buff.stacks}</span>`;
+  if (e.heal) tail += ` <span class="hp">回复 <b style="color:var(--success)">${fmt(e.heal)}</b></span>`;
+  return `<li class="row ${cls}"><span class="t">${e.t.toFixed(2)}s</span><span>${head} <span class="num">${fmt(e.amount)}</span>${tail}</span></li>`;
+}
+
+/* 极简：合并同类命中。**只在渲染层做**，状态里仍是逐条 —— 跟 logLimit 同一条原则
+ * （只裁展示、不改状态），否则"同种子必得同结果"就掺进了渲染逻辑。
+ * 不能只合并"紧邻"的：两方严格交替时相邻同类几乎不存在（实测只省 2.5% 行），
+ * 所以回看窗口取 8 条，且只并"同技能 + 同方向 + 都不带附加效果"的。 */
+const TIDY_WINDOW = 8;
+const mergeable = (e) => e.kind !== 'beat' && !e.debuff && !e.buff && !e.heal;
+function tidy(list) {
+  const out = [];
+  for (const e of list) {
+    let merged = false;
+    if (mergeable(e)) {
+      for (let i = out.length - 1, back = 0; i >= 0 && back < TIDY_WINDOW; i -= 1, back += 1) {
+        const p = out[i];
+        if (p.kind === e.kind && p.skill === e.skill && p.side === e.side && mergeable(p)) {
+          p.x += 1;
+          p.amount += e.amount;
+          p.t = Math.max(p.t, e.t);
+          p.total = e.total;
+          out.splice(i, 1);
+          out.push(p); // 移到末尾：让"最近有动作的"排在最下面，读法不变
+          merged = true;
+          break;
+        }
+      }
+    }
+    if (!merged) out.push({ ...e, x: 1 });
+  }
+  return out;
+}
+function tidyRow(e) {
+  if (e.kind === 'beat') return `<li class="row beat"><span>${esc(e.text)}</span></li>`;
+  const me = e.side === ME;
+  const cls = e.kind === 'crit' ? 'crit' : 'dmg';
+  const name = `<span class="skill">${esc(e.skill)}</span>`;
+  const dir = me ? `<span class="dst">→ ${esc(who(e.target))}</span>` : `<span class="src">${esc(e.actor)} →</span> 你`;
+  const x = e.x > 1 ? `<span class="x">×${e.x}</span>` : '';
+  const avg = e.x > 1 ? ` <span class="hp">均 ${fmt(Math.round(e.amount / e.x))}</span>` : '';
+  return `<li class="row ${cls}"><span class="t">${e.t.toFixed(2)}s</span>${x}<span>${name} ${dir} <span class="num">${fmt(e.amount)}</span>${avg}</span></li>`;
+}
+
+const STYLES = { plain, report, punch, tidy, ref };
+
+/* ============================================================
+ * 参考图语法 —— 骨架照抄参考图，不自己发明：
+ *   ★ 咏唱【技能】 → 目标 造成 N 伤害（暴击！） 附加[状态]
+ *   ⌁ 【单位】技能 击中你！造成 N 伤害
+ *   ✚ [技能] 目标 回复 N 点生命          ← 治疗单独成行
+ *   ✦ 目标 获得/蓄起 [状态×N]            ← 状态变化单独成行
+ *
+ * 括号分工：技能与单位名用全角【】（它们是"名字"），状态用半角[]（它是"附注"），
+ * 说明性后缀用全角（）。混用会让人分不清哪一段是名字。
+ *
+ * 施法统一「咏唱」、命中统一「造成」：给 90 个技能逐个填动词是大工程而且容易填歪，
+ * 一个通用动词已经把"谁对谁放什么"说清了。
+ *
+ * 图标用单色符号（★ ⌁ ✚ ✦ ）不用彩色 emoji：Windows 下 emoji 宽度不一会破坏对齐，
+ * 彩色小图标也跟这套暗色风不搭。
+ * 保留的元素：暴击的数字块 + 红色左边框、回复绿色、状态紫色。
+ * ========================================================== */
+const ICON = { me: '★', foe: '⌁', heal: '✚', buff: '✦', debuff: '✧', crit: '◆' };
+function ref(e) {
+  if (e.kind === 'beat') {
+    return `<li class="row beat"><span class="t"></span><span class="ico">▸</span><span>${esc(e.text)}</span></li>`;
+  }
+  const fromFoe = e.side === FOE;
+  const stamp = `<span class="t">${e.t.toFixed(2)}s</span>`;
+  const crit = e.kind === 'crit';
+  const amt = `<span class="amt">${esc(big(e.amount))}</span>`;
+
+  /* ── 主行：伤害 ── */
+  const head = fromFoe
+    ? `<b>【${esc(e.actor)}】</b><span class="skill">${esc(e.skill)}</span> 击中你！造成 `
+    : `咏唱<span class="skill">【${esc(e.skill)}】</span> → <span class="dst">${esc(who(e.target))}</span> 造成 `;
+  let suffix = crit ? '<span class="sfx">（暴击！）</span>' : '';
+  if (e.debuff) suffix += ` ${fromFoe ? '你被' : '附加'}[${esc(e.debuff.name)}×${e.debuff.stacks}]`;
+  const cls = crit ? 'crit' : fromFoe ? 'dmg fromfoe' : 'dmg';
+  let html = `<li class="row ${cls}">${stamp}<span class="ico">${fromFoe ? ICON.foe : ICON.me}</span>` +
+    `<span>${head}${amt} 伤害 ${suffix}</span></li>`;
+
+  /* ── 治疗单独成行（参考图里 [持续恢复] 回复… 就是独立一行） ── */
+  if (e.heal) {
+    // 回复的是**施法者自己**（selfHeal 语义），不是被打的那个目标 ——
+    // 这里第一版写成 e.target，输出成"骤雷哨卫 回复 60"，等于把吸取对象当成受益者
+    const healed = esc(who(e.actor));
+    html += `<li class="row heal">${stamp}<span class="ico">${ICON.heal}</span>` +
+      `<span><span class="sfx">[${esc(e.skill)}]</span> ${healed} 回复 <span class="amt">${esc(big(e.heal))}</span> 点生命</span></li>`;
+  }
+  /* ── 状态变化单独成行。注意视角：敌方行上的 buff 是它自己攒的，
+     写成「获得[蓄雷]」会让人以为是我方拿到 —— 主语换了，后缀必须跟着换 ── */
+  if (e.buff) {
+    const owner = fromFoe ? esc(e.actor) : esc(who(e.target));
+    html += `<li class="row buff">${stamp}<span class="ico">${ICON.buff}</span>` +
+      `<span>${owner} ${fromFoe ? '蓄起' : '获得'} <span class="sfx">[${esc(e.buff.name)}×${e.buff.stacks}]</span></span></li>`;
+  }
+  return html;
+}
+
+let style = 'plain';
+let shown = 0;
+let timer = null;
+
+const logEl = document.getElementById('log');
+function draw() {
+  const slice = events.slice(0, shown);
+  const rows = style === 'tidy' ? tidy(slice).map(tidyRow) : slice.map(STYLES[style]);
+  logEl.innerHTML = rows.join('');
+  logEl.className = 'log s-' + style;
+  logEl.scrollTop = logEl.scrollHeight;
+  // 顶栏数字跟着走，让"重复"这件事有代价感
+  const upto = slice.filter((e) => e.kind !== 'beat');
+  const dMe = upto.filter((e) => e.side === ME).reduce((a, b) => a + b.amount, 0);
+  const dFoe = upto.filter((e) => e.side === FOE).reduce((a, b) => a + b.amount, 0);
+  document.getElementById('me-dealt').textContent = fmt(dMe);
+  document.getElementById('foe-dealt').textContent = fmt(dFoe);
+  document.getElementById('me-cast').textContent = upto.filter((e) => e.side === ME).length;
+  document.getElementById('foe-cast').textContent = upto.filter((e) => e.side === FOE).length;
+  document.querySelector('#me .who').textContent = meName();
+  renderChips(upto);
+}
+function renderChips(upto) {
+  const chips = { me: new Map(), foe: new Map() };
+  for (const e of upto.slice(-60)) {
+    if (e.buff) { const k = e.buff.name; const m = chips[e.side === ME ? 'me' : 'foe']; m.set(k, (m.get(k) ?? 0) + e.buff.stacks); }
+    if (e.debuff) { const k = e.debuff.name; const m = chips[e.side === ME ? 'foe' : 'me']; m.set(k, (m.get(k) ?? 0) + e.debuff.stacks); }
+  }
+  const paint = (el, map, cls) => {
+    el.innerHTML = [...map].map(([n, s]) => `<span class="chip ${cls}">${esc(n)}<b>${s}</b></span>`).join('');
+  };
+  paint(document.getElementById('me-chips'), chips.me, 'is-buff');
+  paint(document.getElementById('foe-chips'), chips.foe, 'is-debuff');
+}
+
+function setStyle(next) {
+  style = next;
+  document.querySelectorAll('[data-style]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.style === next)));
+  draw();
+}
+document.querySelectorAll('[data-style]').forEach((b) => b.addEventListener('click', () => setStyle(b.dataset.style)));
+
+const playBtn = document.getElementById('play');
+function tickStep() {
+  if (shown >= events.length) { stop(); return; }
+  const e = events[shown];
+  shown += 1;
+  draw();
+  react(e);   // 动效只跟“刚发生的这一条”，不是全量重绘
+}
+function start() {
+  if (timer !== null) return;
+  playBtn.textContent = '❚❚ 暂停'; playBtn.setAttribute('aria-pressed', 'true');
+  timer = setInterval(tickStep, Math.max(8, 260 / Number(document.getElementById('speed').value)));
+}
+function stop() {
+  if (timer === null) return;
+  clearInterval(timer); timer = null;
+  playBtn.textContent = '▶ 播放'; playBtn.setAttribute('aria-pressed', 'false');
+}
+playBtn.addEventListener('click', () => (timer === null ? start() : stop()));
+document.getElementById('speed').addEventListener('input', () => { if (timer !== null) { stop(); start(); } });
+document.getElementById('reset').addEventListener('click', () => { stop(); shown = 0; draw(); });
+document.getElementById('who').addEventListener('input', draw);
+document.getElementById('fx').addEventListener('click', (ev) => {
+  fxOn = !fxOn;
+  ev.target.setAttribute('aria-pressed', String(fxOn));
+  ev.target.textContent = fxOn ? '开' : '关';
+});
+document.getElementById('scale').addEventListener('click', (ev) => {
+  SCALE = SCALE === 1 ? 1_000_000 : 1;   // 放大到百万级才看得到 M/T 的成色
+  ev.target.setAttribute('aria-pressed', String(SCALE !== 1));
+  draw();
+});
+document.getElementById('fs').addEventListener('input', (ev) => document.documentElement.style.setProperty('--fs', ev.target.value + 'px'));
+
+/* 支持 ?style=report 直接进某种写法 —— 截图、对比、发给别人看都靠它 */
+const initial = new URLSearchParams(location.search).get('style');
+if (STYLES[initial]) style = initial;
+document.querySelectorAll('[data-style]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.style === style)));
+
+/* 默认直接放满一次，让四种写法一进来就有东西可比；再点播放可逐条看 */
+shown = events.length;
+draw();
+document.getElementById('log').scrollTop = 0;
+</script>
+</body>
+</html>

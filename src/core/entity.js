@@ -22,7 +22,7 @@ import { assertNonNegativeInteger, assertPositiveInteger, invariant } from '../u
  * @param {string[]} [spec.gcdSequence]
  * @param {Array<{skillId:string, priority?:number}>} [spec.ogcdSlots]
  * @param {number} [spec.hp] 省略时等于 maxHp
- * @param {number} [spec.critChance] 暂击率（小数）。省略时由 damage 契约用默认值
+ * @param {number} [spec.critChance] 暴击率（小数）。省略时由 damage 契约用默认值
  */
 export function createEntity(spec) {
   invariant(typeof spec?.id === 'string' && spec.id !== '', '实体必须有非空 id');
@@ -49,7 +49,7 @@ export function createEntity(spec) {
     hp: Math.min(hp, spec.maxHp),
     attack: spec.attack,
     defense: spec.defense,
-    /** 暂击率（小数）。damage 契约在未传显式 critChance 时读取此字段。 */
+    /** 暴击率（小数）。damage 契约在未传显式 critChance 时读取此字段。 */
     critChance: Number.isFinite(spec.critChance) ? spec.critChance : 0.15,
 
     gcdSequence,

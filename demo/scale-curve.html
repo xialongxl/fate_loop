@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>数值膨胀曲线 Demo · 命运轮回</title>
+<style>
+  :root {
+    --bg: #0d1117; --bg-raised: #161b22; --bg-inset: #0a0e14; --border: #2d333b;
+    --text: #d8dee9; --text-dim: #8b949e; --accent: #58a6ff; --accent-dim: #1f6feb;
+    --danger: #f85149; --success: #3fb950; --warn: #d29922; --elite: #bc8cff;
+    --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --mono: "Cascadia Code", "SF Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  h1 small { color: var(--text-dim); font-weight: 400; font-size: 11px; margin-left: 8px; }
+  .lede { color: var(--text-dim); font-size: 12px; margin: 0 0 12px; max-width: 92ch; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 9px 12px; margin-bottom: 12px;
+    background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; }
+  .g { display: flex; gap: 5px; align-items: center; }
+  .sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 3px; }
+  label { font-size: 11px; color: var(--text-dim); }
+  button.seg { font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; background: var(--bg-inset);
+    color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; }
+  button.seg:hover { color: var(--text); border-color: var(--accent-dim); }
+  button.seg[aria-pressed="true"] { background: var(--accent-dim); color: #fff; }
+  input[type=range] { width: 150px; accent-color: var(--accent); }
+  .val { font-family: var(--mono); font-size: 11px; color: var(--accent); min-width: 3.4em; }
+
+  .grid { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(0,1fr); gap: 12px; }
+  @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--bg-raised); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .card h2 { margin: 0 0 10px; font-size: 12px; letter-spacing: .05em; color: var(--accent); font-weight: 600; }
+  canvas { width: 100%; height: 260px; display: block; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 6px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+  .legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 5px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  td { padding: 4px 0; border-bottom: 1px dotted #21262d; }
+  td:last-child { text-align: right; font-family: var(--mono); }
+  td b { color: var(--text); }
+  .ttk { font-size: 12px; margin-top: 8px; padding: 8px 10px; border-radius: 6px; background: var(--bg-inset); border: 1px solid var(--border); line-height: 1.7; }
+  .ttk .sub { font-size: 11px; color: var(--text-dim); }
+  .ttk.dead { border-color: var(--danger); background: rgba(248,81,73,.12); font-size: 12.5px; }
+  .ttk.bad { border-color: var(--danger); color: #f0b8bd; }
+  .ttk.good { border-color: var(--success); color: #9ce8b0; }
+  .warnbox { margin-top: 8px; border: 1px solid var(--danger); border-radius: 6px; background: rgba(248,81,73,.06); overflow: hidden; }
+  .dg { padding: 7px 10px; font-size: 11.5px; border-bottom: 1px solid rgba(248,81,73,.18); color: #f0b8bd; }
+  .dg:last-child { border-bottom: 0; }
+  .dg-watch { color: #f6d99a; }
+  .dghead { margin-top: 8px; }
+  .dgcount { font-family: var(--mono); font-size: 10.5px; color: var(--success); }
+  .dgcount.has-watch { color: var(--warn); }
+  .dgcount.has-danger { color: var(--danger); }
+  .state { margin-top: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); }
+  .tgt { font-size: 10.5px; color: var(--text-dim); margin-left: 6px; }
+  input[type=range] { width: 92px; }
+  .solved { margin-top: 8px; font-family: var(--mono); font-size: 11px; color: var(--success);
+    border: 1px solid var(--border); background: var(--bg-inset); border-radius: 6px; padding: 7px 10px; }
+  .solved b { color: #fff; }
+  .solved .off { color: var(--danger); }
+  .solved .note { color: var(--text-dim); font-family: var(--font); font-size: 10.5px; }
+  .infobox { margin-top: 8px; padding: 8px 10px; border-radius: 6px; font-size: 11.5px;
+    border: 1px solid var(--border); background: var(--bg-inset); color: var(--text-dim); }
+
+  .fmt { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; font-family: var(--mono); font-size: 12px; }
+  .fmt div { padding: 7px 9px; border-radius: 6px; background: var(--bg-inset); border: 1px solid var(--border); }
+  .fmt span { display: block; font-family: var(--font); font-size: 10px; color: var(--text-dim); margin-bottom: 3px; }
+
+  .log { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+  .log li { display: flex; gap: 7px; align-items: baseline; padding: 3px 0; border-bottom: 1px dotted #21262d; }
+  .log .t { font-family: var(--mono); font-size: 10px; color: var(--text-dim); flex: 0 0 44px; text-align: right; }
+  .log .ico { flex: 0 0 13px; text-align: center; }
+  .log .skill { color: var(--accent); } .log .dst { color: var(--text-dim); }
+  .log .amt { font-family: var(--mono); font-weight: 700; color: #f6c177; }
+  .log .sfx { color: var(--elite); }
+  .log li.crit { background: rgba(248,81,73,.07); border-left: 2px solid var(--danger); padding-left: 6px; margin-left: -8px; }
+  .log li.crit .amt { color: #fff; background: var(--danger); padding: 1px 7px; border-radius: 4px; font-size: 1.25em; }
+  .log li.foe .amt { color: #f0b8bd; }
+  .hint { font-size: 11px; color: var(--text-dim); margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>数值膨胀曲线 Demo<small>关键不是"数字多大"，而是膨胀之后 TTK（几刀一个）有没有崩</small></h1>
+  <p class="lede">
+    拖楼层滑块看任意一层的实际数值；曲线用对数 Y 轴，所以"直线=指数增长、下弯=线性增长"一眼可辨。
+    三种缩放模式并排画在同一张图上。<b>红点</b>是通关线（第 50 层），<b>黄虚线</b>是 float64 精度墙 —— 本 demo 已改用<b>定点 BigInt</b>，所以那条线现在只是参照。单位用 K/M/B/T。
+  </p>
+
+  <div class="bar">
+    <div class="g">
+      <label>缩放模式</label>
+      <button class="seg" data-mode="current" aria-pressed="false">现状·线性</button>
+      <button class="seg" data-mode="proposal" aria-pressed="true">提案·无尽指数</button>
+      <button class="seg" data-mode="aggressive" aria-pressed="false">激进·全程指数</button>
+    </div>
+    <div class="sep"></div>
+    <div class="g"><label>楼层</label><input type="range" id="floor" min="1" max="300" value="87" /><span class="val" id="floorV">87</span></div>
+    <div class="sep"></div>
+    <div class="g"><label>暴击倍率</label><input type="range" id="crit" min="15" max="40" value="22" /><span class="val" id="critV">2.2</span></div>
+    <div class="sep"></div>
+    <div class="g"><button class="seg" id="kfix" aria-pressed="true">防御 K 跟随缩放</button></div>
+    <div class="g"><button class="seg" id="perm" aria-pressed="false">永久加成乘区</button></div>
+    <div class="sep"></div>
+    <div class="g"><label>无尽成长同步度</label><input type="range" id="sync" min="80" max="112" value="100" /><span class="val" id="syncV">1.00</span></div>
+    <div class="sep"></div>
+    <div class="g">
+      <label>目标边际</label>
+      <span class="tgt">第1层</span><input type="range" id="t1" min="10" max="40" value="20" /><span class="val" id="t1V">2.0</span>
+      <span class="tgt">第50层</span><input type="range" id="t50" min="10" max="40" value="25" /><span class="val" id="t50V">2.5</span>
+      <span class="tgt">第300层</span><input type="range" id="t300" min="10" max="40" value="18" /><span class="val" id="t300V">1.8</span>
+      <span class="tgt">目标时长</span><input type="range" id="tsec" min="10" max="90" value="30" /><span class="val" id="tsecV">30s</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>成长曲线（对数轴）</h2>
+      <canvas id="cv" width="900" height="380"></canvas>
+      <div class="legend">
+        <span><i style="background:#8b949e"></i>现状·线性</span>
+        <span><i style="background:#58a6ff"></i>提案·无尽指数</span>
+        <span><i style="background:#bc8cff"></i>激进·全程指数</span>
+        <span><i style="background:#f85149"></i>玩家单次暴击伤害（当前模式）</span>
+      </div>
+      <div class="fmt">
+        <div><span>不格式化（精确整数）</span><b id="raw">—</b></div>
+        <div><span>K / M / B / T 缩写</span><b id="abbr" style="color:var(--success)">—</b></div>
+      </div>
+      <h2 style="margin-top:14px">安全边际 vs 目标（自动反解参数）</h2>
+      <canvas id="cv2" width="900" height="240"></canvas>
+      <div class="legend">
+        <span><i style="background:#58a6ff"></i>当前配置的边际</span>
+        <span><i style="background:#d29922"></i>你给的目标曲线</span>
+        <span><i style="background:#3fb950"></i>健康区 1.4~4</span>
+      </div>
+      <div class="solved" id="solved">—</div>
+    </div>
+
+    <div class="card">
+      <h2>第 <b id="fTitle">87</b> 层的实际数值</h2>
+      <table>
+        <tr><td>玩家成型攻击</td><td><b id="pAtk">—</b></td></tr>
+        <tr><td>普通怪 HP</td><td><b id="mHp">—</b></td></tr>
+        <tr><td>普通怪攻击</td><td><b id="mAtk">—</b></td></tr>
+        <tr><td>怪防御 / 实际减伤</td><td><b id="mDef">—</b></td></tr>
+        <tr><td>单次暴击伤害</td><td><b id="critDmg" style="color:var(--danger)">—</b></td></tr>
+      </table>
+      <div class="ttk" id="ttk">—</div>
+      <div class="state" id="state">—</div>
+      <div class="dghead"><span class="dgcount" id="dgcount">—</span></div>
+      <div class="warnbox" id="kwarn" hidden></div>
+      <div class="infobox">ℹ <b>BigInt 的代价不是类型，是定点化</b>：本屏所有乘除都走
+        <code>mulFP/divFP</code>（×1e6 标度 + 四舍五入收敛）。本作公式里有
+        <code>K/(K+defense)</code> 与 Buff 乘数，直接换 BigInt 会全部炸掉 ——
+        真做时要么整层定点化，要么给数值封顶。换定点后 <b>2^53 不再是限制</b>（黄虚线只是参照）。</div>
+      <div class="hint"><b>安全边际 = 玩家扛得住的秒数 ÷ 打完全部怪要的秒数</b>，双方出手间隔不同
+        （玩家 2.4s / 怪 3.0s），所以必须换算到时间轴再比 —— 直接比刀数会漏判必输组合。
+        &lt;1 必输，1~1.4 无容错，1.4~4 健康，&gt;4 满血躺赢。
+        膨胀做对了的话，这个边际应当<b>逐层恒定</b>，只有绝对数字在变大。</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <h2>该层日志观感（参考图语法）</h2>
+    <ul class="log" id="log"></ul>
+  </div>
+
+<script>
+'use strict';
+/* ============================================================
+ * 数值模型：**定点 BigInt**
+ *
+ * 为什么不能直接用浮点：第 ~190 层就撞穿 2^53（≈9.0e15），之后"整数"不再精确。
+ * 为什么不能只换 BigInt：BigInt 存不了分数，而公式里全是 `1.22^k`、
+ * `K/(K+defense)` 这类有理数 —— 所以必须**定点化**：所有中间量都表示成
+ * "×1e6 的整数"，每次乘除都显式收敛标度。
+ * 这才是"改成 BigInt"的真实代价：不是换个类型，是把数值层改成整数定点。
+ * ========================================================== */
+const FP = 1_000_000n;                       // 1.0 的定点表示
+const toFP = (x) => BigInt(Math.round(x * 1e6));
+const mulFP = (a, b) => (a * b + FP / 2n) / FP;             // 乘完收敛标度（四舍五入）
+const divFP = (a, b) => (a * FP + b / 2n) / b;              // 除完放大标度
+const powFP = (base, k) => { let r = FP; for (let i = 0; i < k; i += 1) r = mulFP(r, base); return r; };
+const fpNum = (v) => Number(v) / 1e6;                       // 只用于画轴与百分比
+
+const BASE = {
+  playerAtk: 165,
+  mobHp: 2100,        // 与 mobAtk 一样，是为"让 TTK 落在健康区间"定的相对值，不是游戏现值
+  mobAtk: 120,
+  mobDef: 14,
+  playerHp: 900,
+  playerDef: 20,
+  skillPower: 1.15,
+  defenseK: 100,      // ← damage.js 里那个绝对常数，本 demo 的重点之一
+  ENDLESS: 1.22,      // 无尽段每层的共同底数
+};
+
+/* 装备/强化：随层数成型，到 45 层左右基本毕业 */
+const equipFP = (f) => toFP(1 + Math.min(5, f / 9));
+const enhanceFP = (f) => powFP(toFP(1.08), Math.min(10, Math.floor(f / 4)));
+
+const MODES = {
+  current: {
+    label: '现状·线性', color: '#8b949e',
+    hpFP: (f) => toFP(1 + (f - 1) * 0.12),      // encounter.js 原式
+    atkFP: (f) => toFP(1 + (f - 1) * 0.08),
+  },
+  proposal: {
+    label: '提案·无尽指数', color: '#58a6ff',
+    // 1–50 保持现状（被调过胜率的主战场不动），51+ 才起飞。
+    // ⚠ hp 与 atk 用**同一个底数**：玩家只有一条成长曲线，怪的的血量与攻击必须
+    //   同步缩放，否则两条 TTK 必有一条漂走（第一版 atk 用 1.20，第 100 层就变成
+    //   "要打 83 万刀才死"）
+    hpFP: (f) => (f <= 50 ? toFP(1 + (f - 1) * MOB_LIN_HP) : mulFP(toFP(1 + 49 * MOB_LIN_HP), powFP(toFP(MOB_END_BASE), f - 50))),
+    // ⚠ 无尽段 hp 与 atk **必须同一个底数**：玩家只有一条成长曲线，怪的血量与攻击
+    //   分开配会让"击杀边际"和"承伤边际"朝相反方向漂
+    atkFP: (f) => (f <= 50 ? toFP(1 + (f - 1) * 0.08) : mulFP(toFP(1 + 49 * 0.08), powFP(toFP(MOB_END_BASE), f - 50))),
+  },
+  aggressive: {
+    label: '激进·全程指数', color: '#bc8cff',
+    hpFP: (f) => powFP(toFP(1.18), f - 1),
+    atkFP: (f) => powFP(toFP(1.14), f - 1),
+  },
+};
+
+let mode = 'proposal';
+let kScaling = true;
+let permMul = false;
+let sync = 1;
+
+/* 三个**由目标边际反解出来**的旋钮。刻意只留三个，且各自只管一段楼层，
+ * 这样求解不会互相打架（见 solveTargets 的注释）：
+ *   MOB_HP_MUL    怪血量总倍率      —— 只管第 1 层的压力
+ *   MOB_LIN_HP    1–50 层线性系数   —— 只管通关前的斜率
+ *   MOB_END_BASE  无尽段底数        —— 只管 51 层之后（hp 与 atk 共用，见下方理由） */
+let MOB_HP_MUL = 1;
+let MOB_LIN_HP = 0.12;
+let MOB_END_BASE = 1.22;
+/** 第四个旋钮：玩家生命总倍率。它**只影响边际、不影响时长**
+ * （时长由 ttk=mobHp/dmg 决定，跟玩家生命无关）—— 这是能把两个目标分开的关键 */
+let PLR_HP_MUL = 1;
+/** 第五个旋钮：玩家生命的**层数成长**（独立于装备曲线）。
+ * 加它的原因很实在：目标有 5 个（时长@1、时长@50、边际@1、边际@50、边际@300），
+ * 四个旋钮时第 50 层的边际根本没人管 —— 解出来是 4.82 而目标是 2.5。
+ * 它只进 margin 的分子（玩家生命），不进 ttk，所以不会破坏时长。
+ * 用**幂**而不是线性系数：① 在第 1 层恒等于 1，不会回头破坏第 2 步解出的边际；
+ * ② 允许负值（玩家生命长得比装备曲线慢），第一版用线性系数卡在下限 0，
+ *    于是"第 50 层边际 4.82 想压到 2.5"根本解不动。 */
+let PLR_HP_POW = 0;
+const targets = () => ({
+  t1: Number(document.getElementById('t1').value) / 10,
+  t50: Number(document.getElementById('t50').value) / 10,
+  t300: Number(document.getElementById('t300').value) / 10,
+  sec: Number(document.getElementById('tsec').value),
+});
+
+const state = () => ({
+  floor: Number(document.getElementById('floor').value),
+  crit: Number(document.getElementById('crit').value) / 10,
+});
+
+/**
+ * 无尽段玩家的成长来源（更高层掉更好的装备、永久加成继续叠）。
+ * `sync` 是这一屏最关键的旋钮：1.00 = 玩家与怪同步膨胀（TTK 恒定，只有数字变大）；
+ * <1 玩家涨得慢（TTK 爆炸，变成磨）；>1 涨得快（TTK 归 1，一刀秒、build 失去意义）。
+ * 底数按 sync 折算一次（全流程唯一的浮点步骤），之后都是整数迭代。
+ * 现状模式不给这一项 —— 那正是它后期变磨的原因，三种模式比的就是"有没有这条曲线"。
+ */
+const endlessFP = (f) => {
+  if (f <= 50 || mode === 'current') return FP;
+  return powFP(toFP(Math.pow(BASE.ENDLESS, sync)), f - 50);
+};
+const permFactorFP = (f) => (permMul ? powFP(toFP(1.06), Math.min(60, Math.floor(f / 2))) : FP);
+const growthFP = (f) => mulFP(mulFP(equipFP(f), enhanceFP(f)), mulFP(permFactorFP(f), endlessFP(f)));
+
+const playerAtkFP = (f) => mulFP(toFP(BASE.playerAtk), growthFP(f));
+const playerHpFP = (f) => mulFP(toFP(BASE.playerHp * PLR_HP_MUL * Math.pow(f, PLR_HP_POW)), growthFP(f));
+// 玩家防御跟着玩家自己的成长曲线走。之前这里乘了 hpFP * endlessFP，而 hpFP 在
+// 无尽段本身已经含 1.22^k —— 重复乘一次等于防御指数爆炸，存活 TTK 直接崩成 1 刀
+const playerDefFP = (f) => mulFP(toFP(BASE.playerDef), growthFP(f));
+
+function model(f, m) {
+  const M = MODES[m];
+  const hpS = M.hpFP(f);
+  const atkS = M.atkFP(f);
+  const mobHp = mulFP(toFP(BASE.mobHp * MOB_HP_MUL), hpS);
+  const mobAtk = mulFP(toFP(BASE.mobAtk), atkS);
+  const mobDef = mulFP(toFP(BASE.mobDef), atkS);
+  const K = kScaling ? mulFP(toFP(BASE.defenseK), atkS) : toFP(BASE.defenseK);
+  const mitFP = divFP(K, K + mobDef);                       // 打怪时的减伤系数
+  const dmg = mulFP(mulFP(playerAtkFP(f), toFP(BASE.skillPower)), mitFP);
+  const critDmg = mulFP(dmg, toFP(state().crit));
+
+  // Kp 跟着**来袭攻击**的曲线缩放（mobAtk 用 atkS），这样减伤比例才恒定
+  const Kp = kScaling ? mulFP(toFP(BASE.defenseK), atkS) : toFP(BASE.defenseK);
+  const takenPerHit = mulFP(mobAtk, divFP(Kp, Kp + playerDefFP(f)));
+  // BigInt 除法向下取整，正好是"要几刀"的语义；至少 1 刀。
+  // ⚠ 伤害归 0 时**不能兜底成 1 刀** —— 那是在说"一刀秒"，而真相是"完全打不动"。
+  // 定点化后 mitFP 会整段舍到 0（K 固定、防方涨到天文数字），所以这条分支真会走到。
+  // 用 -1n 当"打不动"的哨兵，显示层负责说人话。
+  const ttk = dmg > 0n ? mobHp / dmg + 1n : -1n;
+  const ttkMe = takenPerHit > 0n ? playerHpFP(f) / takenPerHit + 1n : -1n;
+  return { mobHp, mobAtk, mobDef, mitFP, dmg, critDmg, ttk, ttkMe };
+}
+
+/* ── K / M / B / T 格式化（输入 BigInt） ───────────────────
+ * 取两位小数也走整数运算：一旦转 Number 取小数，BigInt 就白改了。 */
+const UNITS = [
+  [1_000_000_000_000_000_000_000_000_000_000n, 'No'],   // 1e33
+  [1_000_000_000_000_000_000_000_000_000n, 'Oc'],       // 1e30
+  [1_000_000_000_000_000_000_000_000n, 'De'],           // 1e27
+  [1_000_000_000_000_000_000_000n, 'Sp'],               // 1e24
+  [1_000_000_000_000_000_000n, 'Sx'],                   // 1e21
+  [1_000_000_000_000_000n, 'Qi'],                       // 1e18
+  [1_000_000_000_000_000n, 'Qa'],                       // 1e15
+  [1_000_000_000_000n, 'T'],                            // 1e12
+  [1_000_000_000n, 'B'],                                // 1e9
+  [1_000_000n, 'M'],                                    // 1e6
+  [1_000n, 'K'],                                        // 1e3
+];
+const commas = (digits) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+function big(v) {
+  const n = typeof v === 'bigint' ? v : BigInt(Math.round(Number(v)));
+  const neg = n < 0n ? '-' : '';
+  const a = neg ? -n : n;
+  for (const [div, name] of UNITS) {
+    if (a >= div) {
+      const scaled = (a * 100n + div / 2n) / div;       // 百分位，纯整数
+      const s = scaled.toString();
+      const int = commas(s.slice(0, -2) || '0');
+      const dec = s.slice(-2);
+      return `${neg}${int}${dec === '00' ? '' : `.${dec}`}${name}`;
+    }
+  }
+  return `${neg}${commas(a.toString())}`;
+}
+const raw = (v) => commas((typeof v === 'bigint' ? v : BigInt(Math.round(Number(v)))).toString());
+/**
+ * 定点值 → 显示值。忘了这一步就会看到"第 1 层暴击 406.87M"——
+ * 那是 ×1e6 标度漏进了显示层（真实伤害是整数，所以这里直接收敛到整数单位）。
+ */
+const toUnits = (v) => (v + FP / 2n) / FP;
+const disp = (v) => big(toUnits(v));
+const dispRaw = (v) => raw(toUnits(v));
+
+/* ── 曲线绘制（画轴位置用 Number 就够，精确性只在数值层要求） ── */
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const WALL_BITS = 53;                                    // float64 精确整数上限的位宽
+
+function drawCurve() {
+  const { floor } = state();
+  const W = cv.width, H = cv.height, pad = { l: 74, r: 12, t: 12, b: 26 };
+  ctx.clearRect(0, 0, W, H);
+  const maxF = 300;
+  const hi = 36;                                          // 对数轴画到 1e36
+  const X = (f) => pad.l + (f / maxF) * (W - pad.l - pad.r);
+  const Y = (v) => H - pad.b - (Math.log10(Math.max(1, v)) / hi) * (H - pad.t - pad.b);
+
+  ctx.font = '11px monospace';
+  for (let e = 0; e <= hi; e += 3) {
+    const y = Y(Math.pow(10, e));
+    ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    ctx.fillStyle = '#8b949e';
+    ctx.fillText(e === 0 ? '1' : big(10n ** BigInt(e)), 6, y + 4);
+  }
+  for (const f of [50, 100, 150, 200, 250, 300]) {
+    ctx.strokeStyle = '#181d24'; ctx.beginPath();
+    ctx.moveTo(X(f), pad.t); ctx.lineTo(X(f), H - pad.b); ctx.stroke();
+    ctx.fillStyle = '#8b949e'; ctx.fillText(`第${f}层`, X(f) - 18, H - 8);
+  }
+  // float64 精度墙：现在只是"如果没换 BigInt 会在这里出事"的参照线
+  const wallY = Y(Number(WALL_BITS === 53 ? 9.007199254740992e15 : 0));
+  ctx.setLineDash([4, 4]); ctx.strokeStyle = '#d29922';
+  ctx.beginPath(); ctx.moveTo(pad.l, wallY); ctx.lineTo(W - pad.r, wallY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#d29922';
+  ctx.fillText('float64 精度墙 2^53 —— 定点 BigInt 下已不再是限制', pad.l + 6, wallY - 5);
+
+  for (const key of ['current', 'proposal', 'aggressive']) {
+    ctx.strokeStyle = MODES[key].color; ctx.lineWidth = key === mode ? 2.4 : 1.2;
+    ctx.beginPath();
+    for (let f = 1; f <= maxF; f += 1) {
+      const v = fpNum(mulFP(toFP(BASE.mobHp), MODES[key].hpFP(f)));
+      if (f === 1) ctx.moveTo(X(f), Y(v)); else ctx.lineTo(X(f), Y(v));
+    }
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#f85149'; ctx.lineWidth = 2; ctx.beginPath();
+  for (let f = 1; f <= maxF; f += 1) {
+    const v = fpNum(model(f, mode).critDmg);
+    if (f === 1) ctx.moveTo(X(f), Y(v)); else ctx.lineTo(X(f), Y(v));
+  }
+  ctx.stroke();
+
+  ctx.strokeStyle = '#f85149'; ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(X(50), pad.t); ctx.lineTo(X(50), H - pad.b); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#f85149'; ctx.beginPath(); ctx.arc(X(50), H - pad.b, 3.5, 0, 7); ctx.fill();
+  ctx.strokeStyle = '#d8dee9'; ctx.beginPath();
+  ctx.moveTo(X(floor), pad.t); ctx.lineTo(X(floor), H - pad.b); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.beginPath();
+  ctx.arc(X(floor), Y(fpNum(model(floor, mode).critDmg)), 4, 0, 7); ctx.fill();
+}
+
+/* ============================================================
+ * 诊断台。13 项检查，分 ⚠ danger / ● watch 两级。
+ * 每一项都必须是"从模型里量出来的"，不是"看哪个开关被按了" ——
+ * 否则新加一个旋钮就会漏报（上一版就是这么丢了两条警告的）。
+ * ========================================================== */
+const LOG_CAPACITY = 100;          // 游戏里的日志条数上限
+const MOBS_PER_FIGHT = 2;          // 一场平均怪数
+const GCD_ME = 2.4;                // 玩家平均出手间隔（秒，虚拟时间）
+const GCD_MOB = 3.0;               // 怪平均出手间隔
+/* 目标手感。**区间不是拍的**：一场自动战斗理想是 15~40 秒结束、
+ * 玩家结束时还剩 20%~65% 生命 —— 由此反推安全边际。
+ * 上一版用"击杀 5~25 刀 / 存活 8~40 刀"两条独立区间，宽到能同时放过
+ * "26 刀才打死一个怪"和"只能扛 8 刀"这种**必输组合**（玩家实测到的就是这个）。 */
+const TARGET = {
+  fightSecMin: 15, fightSecMax: 40, fightSecFatal: 75,
+  marginMin: 1.4, marginMax: 4.0, marginFatalBelow: 1.0,   // <1 数学上必输
+  killHitsMin: 6, killHitsMax: 16,                          // 收紧：26 刀就该报
+  liveHitsMin: 10, liveHitsMax: 30,
+  redPctMin: 5, redPctMax: 70,                              // 减伤区分度
+};
+const TOP_UNIT = 1_000_000_000_000_000_000_000_000_000n;   // No = 1e33，缩写阶梯的顶
+
+/**
+ * 战斗结算模型 —— 把"几刀"换算到**同一条时间轴**再比。
+ *
+ * 为什么不能直接比刀数：玩家 2.4s 一刀、怪 3.0s 一刀，"我 26 刀 vs 我能扛 8 刀"
+ * 与"我 26 刀 vs 我能扛 10 刀"的胜负关系完全不同。换算成秒才可比：
+ *   打完全部怪需要 timeToKill = ttk × GCD_ME × 怪数
+ *   被全部怪打死需要 timeToDie  = ttkMe × GCD_MOB × 怪数
+ *   安全边际 margin = timeToDie / timeToKill
+ * margin < 1 就是**数学上必输**（不管区间怎么定），这是比"越界"硬得多的判据。
+ */
+function fightModel(m) {
+  const ttk = m.ttk < 0n ? Infinity : Number(m.ttk);
+  const ttkMe = m.ttkMe < 0n ? Infinity : Number(m.ttkMe);
+  const timeToKill = ttk * GCD_ME * MOBS_PER_FIGHT;
+  const timeToDie = ttkMe * GCD_MOB * MOBS_PER_FIGHT;
+  const margin = timeToKill > 0 ? timeToDie / timeToKill : Infinity;
+  // 结束时剩余生命比例：1 - 被打中的时间占比（近似，忽略治疗与减伤波动）
+  const hpLeft = margin === Infinity ? 1 : Math.max(0, 1 - 1 / margin);
+  return { ttk, ttkMe, timeToKill, timeToDie, margin, hpLeft };
+}
+
+/** 定点迭代 vs 闭式浮点：量化"每步四舍五入"累积下来的误差 */
+function fpDrift(k) {
+  const iter = fpNum(powFP(toFP(BASE.ENDLESS), k));
+  const closed = Math.pow(BASE.ENDLESS, k);
+  return closed > 0 ? Math.abs(iter - closed) / closed : 0;
+}
+const digitsOf = (v) => (v < 0n ? -v : v).toString().length;
+
+function diagnose(f, m) {
+  const d = [];
+  const push = (level, text) => d.push({ level, text });
+  const F = fightModel(m);
+  const killOk = F.ttk >= TARGET.killHitsMin && F.ttk <= TARGET.killHitsMax;
+  const liveOk = F.ttkMe >= TARGET.liveHitsMin && F.ttkMe <= TARGET.liveHitsMax;
+  const redPct = (1 - fpNum(m.mitFP)) * 100;
+  const atkUnits = toUnits(m.critDmg);
+  // 只取永久加成那一乘区。用 growthFP 会把无尽成长一起算进来，
+  // 于是"永久加成 ×1.66e24"这种数字看着像 bug（其实大部分是无尽曲线）
+  const permGrowth = fpNum(permFactorFP(f));
+
+  /* 0. 中途越界：控制点命中不代表全程命中。这一条独立于当前楼层，
+        因为"第 10 层掉到 ×1.25"这种问题恰恰只在没被选中的楼层上出现 */
+  const sw = sweep();
+  if (sw.worstMargin.v < TARGET.marginFatalBelow) {
+    push('danger', `第 <b>${sw.worstMargin.f}</b> 层边际只有 <b>×${sw.worstMargin.v.toFixed(2)}</b>（<1 必输）` +
+      `—— 三个控制点可能全都命中，但中间这层玩家打不过`);
+  } else if (sw.worstMargin.v < TARGET.marginMin && sw.worstMargin.f !== f) {
+    push('watch', `全程最差在第 <b>${sw.worstMargin.f}</b> 层（×${sw.worstMargin.v.toFixed(2)}，低于 ${TARGET.marginMin}）` +
+      `：当前楼层不是最危险的那一层，别只按现在这层调参`);
+  }
+  if (sw.bestMargin.v > TARGET.marginMax * 1.6) {
+    push('watch', `第 <b>${sw.bestMargin.f}</b> 层边际冲到 <b>×${sw.bestMargin.v.toFixed(2)}</b>：` +
+      `那是装备/强化<b>毕业点错位</b>造成的鼓包（玩家成长停了、怪还在涨之前的最后一刻最轻松）`);
+  }
+  /* 1. 安全边际：主判据。它把"击杀要几刀"和"我能扛几刀"放到同一条时间轴上比，
+        所以不会像两条独立区间那样放过"必输组合"。 */
+  if (!Number.isFinite(F.margin) || F.margin === 0) {
+    push(F.margin === 0 ? 'danger' : 'watch', F.ttk === Infinity
+      ? `<b>完全打不动</b>（伤害被定点化舍到 0）—— 战斗永不结束`
+      : `<b>玩家打不死</b>：怪造成的伤害被舍到 0，战斗同样永不结束`);
+  } else if (F.margin < TARGET.marginFatalBelow) {
+    push('danger', `<b>这一层数学上必输</b>：打完全部怪要 ${F.timeToKill.toFixed(0)}s，` +
+      `而玩家只扛得住 ${F.timeToDie.toFixed(0)}s（安全边际 <b>×${F.margin.toFixed(2)}</b> < 1）。` +
+      `两条独立区间会各自"看着还行"，放一起就是死局 —— 这正是必须用边际而不是区间的理由`);
+  } else if (F.margin < TARGET.marginMin) {
+    push('danger', `安全边际只有 <b>×${F.margin.toFixed(2)}</b>（建议 ≥${TARGET.marginMin}）：` +
+      `赢是赢了，但没有一点容错 —— 本作是纯自动战斗，没有走位可以指望；` +
+      `能翻盘的只有暴击判定与 Buff 时序，而这两者都是种子决定的。` +
+      `边际这么薄的层，换个种子胜率就会剧烈抖动`);
+  } else if (F.margin > TARGET.marginMax) {
+    push('watch', `安全边际 <b>×${F.margin.toFixed(2)}</b> 偏高（建议 ≤${TARGET.marginMax}）：` +
+      `玩家满血躺赢，膨胀带来的压力没落到玩家身上`);
+  }
+  /* 2. 结束时剩余生命：边际的直觉版，玩家能感知的是这个 */
+  if (Number.isFinite(F.margin) && F.margin > 0) {
+    if (F.hpLeft < 0.05) push('watch', `战斗结束时大约只剩 <b>${(F.hpLeft * 100).toFixed(1)}%</b> 生命 —— 丝血惊险，` +
+      `下一场遭遇几乎必死（本作 HP 跨场继承）`);
+    else if (F.hpLeft > 0.85) push('watch', `战斗结束时还剩 <b>${(F.hpLeft * 100).toFixed(0)}%</b> 生命：` +
+      `这层的怪基本没碰到玩家`);
+  }
+  /* 3. 单侧越界：仍然报，但降级为 watch —— 有边际兜底，它只是"为什么"的线索 */
+  if (!killOk) push('watch', `击杀要 <b>${big(m.ttk)}</b> 刀，超出 ${TARGET.killHitsMin}~${TARGET.killHitsMax} ` +
+    `（战斗节奏偏${F.ttk > TARGET.killHitsMax ? '慢' : '快'}）`);
+  if (!liveOk) push('watch', `玩家能承受 <b>${big(m.ttkMe)}</b> 刀，超出 ${TARGET.liveHitsMin}~${TARGET.liveHitsMax} ` +
+    `（承伤曲线偏${F.ttkMe > TARGET.liveHitsMax ? '硬' : '脆'}）`);
+  /* 4. 暴击波动性：倍率越高，实际结果越依赖运气，期望值失去意义 */
+  const critRatio = state().crit;
+  if (critRatio >= 2.8) {
+    push('watch', `暴击倍率 ×${critRatio.toFixed(1)}：暴击伤害是平时的 <b>${critRatio.toFixed(1)}</b> 倍，` +
+      `TTK 与胜率的<b>方差</b>被放大 —— 用期望值判断手感会失真，需要跑蒙特卡洛而不是看单点`);
+  }
+
+  /* 3. 防御 K 不跟随缩放：本作最容易踩的坑 */
+  if (!kScaling && (redPct < TARGET.redPctMin || redPct > TARGET.redPctMax)) {
+    push('danger', `<b>防御 K 未跟随缩放</b>：本层减伤 <b>${redPct.toFixed(1)}%</b>。` +
+      `<code>mitigated = boosted*100/(100+defense)</code> 里的 100 是绝对常数，攻防在涨 ⇒ ` +
+      (redPct > 90 ? '伤害被吸干，打不动' : '防御蒸发，堆防 build 消失'));
+  }
+  /* 4. 减伤饱和：即使 K 缩放了，def 与 K 比例失衡同样失去区分度 */
+  if (kScaling && (redPct < TARGET.redPctMin - 3 || redPct > TARGET.redPctMax + 10)) {
+    push('watch', `● 减伤饱和在 <b>${redPct.toFixed(1)}%</b> —— 这个区间里"堆防御"几乎不改变结果，` +
+      `属性点变成摆设。需要重配 K 或改成带封顶的百分比减免`);
+  }
+  /* 5. 敌方暴击一刀秒玩家 */
+  const foeCrit = mulFP(m.mobAtk, toFP(1.5));
+  if (foeCrit >= playerHpFP(f)) {
+    push('danger', `<b>敌方暴击可一刀秒玩家</b>：暴击 ${disp(foeCrit)} ≥ 玩家生命 ${disp(playerHpFP(f))}。` +
+      `自动战斗里没有"残血反打"的空间了，胜率会剧烈抖动`);
+  }
+  /* 6. 定点累计误差 */
+  if (f > 50) {
+    const drift = fpDrift(f - 50);
+    if (drift > 0.05) push('danger', `<b>定点累计误差 ${(drift * 100).toFixed(1)}%</b>：每步四舍五入迭代 ` +
+      `${f - 50} 次后与闭式解偏离过大 —— 数值会"看着对但存不下"。要么提高 FP 标度，要么改成闭式整数比`);
+    else if (drift > 0.005) push('watch', `● 定点累计误差 <b>${(drift * 100).toFixed(2)}%</b>（迭代 ${f - 50} 次）` +
+      `：目前可接受，但误差随层数<b>线性累积</b>，加深前先量一次`);
+  }
+  /* 7. 缩写阶梯耗尽 */
+  if (atkUnits >= TOP_UNIT) {
+    push('danger', `<b>缩写阶梯已用尽</b>（本层 ${disp(atkUnits)} 超过最大单位 No=1e33）：` +
+      `需要延长单位表或改科学计数 —— 否则会显示成一串逗号码`);
+  }
+  /* 8. 精确整数太长会撑破面板 */
+  const dg = digitsOf(toUnits(atkUnits));
+  if (dg >= 12) {
+    push('watch', `● 不缩写的精确整数有 <b>${dg}</b> 位（${raw(toUnits(atkUnits))}）：` +
+      `血条、角色面板、tooltip 都要预留宽度或强制缩写，否则排版会撑破`);
+  }
+  /* 9. 成长来源枯竭：装备/强化毕业后再无成长 */
+  const equipDone = f >= 45, enhanceDone = Math.floor(f / 4) >= 10;
+  if (equipDone && enhanceDone && mode === 'current' && !permMul) {
+    push('watch', `● <b>玩家成长已枯竭</b>：装备（第 45 层毕业）与强化（第 40 层毕业）都到顶，` +
+      `现状模式没有无尽成长轴 —— 之后每层只面对更厚的怪，TTK 必然单调上涨`);
+  }
+  /* 10. 永久加成复利无上限 */
+  if (permMul && f >= 60) {
+    push('watch', `永久加成是<b>无上限复利</b>（本层 ×${permGrowth.toFixed(2)}）：` +
+      `跨局累积没有封顶时，老玩家会单方面碾压曲线；要么设上限，要么让它只作用于前期`);
+  }
+  /* 11. 单场战斗时长 */
+  if (Number.isFinite(F.timeToKill)) {
+    if (F.timeToKill > TARGET.fightSecFatal) {
+      push('danger', `<b>单场战斗约 ${F.timeToKill.toFixed(0)} 秒</b>（打完 ${MOBS_PER_FIGHT} 只怪）：` +
+        `超过 ${TARGET.fightSecFatal}s，玩家会直接跳结果，日志也刷不完`);
+    } else if (F.timeToKill > TARGET.fightSecMax || F.timeToKill < TARGET.fightSecMin) {
+      push('watch', `单场战斗约 <b>${F.timeToKill.toFixed(0)}</b> 秒，偏离目标区间 ` +
+        `${TARGET.fightSecMin}~${TARGET.fightSecMax}s（偏${F.timeToKill > TARGET.fightSecMax ? '长' : '短'}）`);
+    }
+  }
+  /* 12. 日志容量：回溯看不到开头 */
+  if (m.ttk > 0n) {
+    const linesPerFight = F.ttk * MOBS_PER_FIGHT * 2 + 6;   // 每次施放约 2 行（伤害+状态）
+    if (Number.isFinite(linesPerFight) && linesPerFight > LOG_CAPACITY) {
+      push('watch', `● 一场战斗约 <b>${Math.round(linesPerFight)}</b> 行日志，超过 LOG_CAPACITY=${LOG_CAPACITY}：` +
+        `开头被裁掉，玩家回看时看不到"这局是怎么输的"。要么提容量，要么上聚合`);
+    }
+  }
+  /* 13. 层间涨幅：断崖或无感 */
+  if (f > 1 && f < 300) {
+    const cur = fpNum(mulFP(toFP(BASE.mobHp), MODES[mode].hpFP(f)));
+    const nxt = fpNum(mulFP(toFP(BASE.mobHp), MODES[mode].hpFP(f + 1)));
+    const ratio = nxt / cur - 1;
+    if (ratio > 0.20) push('watch', `第 ${f}→${f + 1} 层怪血量涨幅 <b>+${(ratio * 100).toFixed(0)}%</b>：` +
+      `超过 20% 玩家会感觉是断崖而不是成长`);
+    else if (ratio < 0.01 && f > 50) push('watch', `● 第 ${f}→${f + 1} 层涨幅仅 +${(ratio * 100).toFixed(1)}%：` +
+      `无尽段几乎没有压力变化，膨胀只发生在显示层（这未必是坏事，但要是有意的）`);
+  }
+  return d;
+}
+
+/* ============================================================
+ * 反解：给定三个目标边际，解出上面三个旋钮。
+ *
+ * 为什么能顺序解而不用迭代：三个旋钮**各自只管一段楼层**——
+ *   hpFP(1) = 1 + 0×LIN = 1        → LIN 与 END 都不影响第 1 层，只有总倍率影响
+ *   hpFP(50) = 1 + 49×LIN          → END 在 50 层是 ^0 = 1，不影响
+ *   hpFP(300) = (1 + 49×LIN)×END^250 → 只有 END 是自由量（LIN 已定）
+ * 所以按 1 → 50 → 300 的顺序解，后一步不会推翻前一步。
+ * ========================================================== */
+const marginAt = (f) => fightModel(model(f, 'proposal')).margin;
+const ttkAt = (f) => fightModel(model(f, 'proposal')).ttk;
+/** 目标刀数 = 目标时长 ÷ (玩家出手间隔 × 怪数)。时长与 TTK 是同一件事的两种说法 */
+const ttkTarget = () => targets().sec / (GCD_ME * MOBS_PER_FIGHT);
+
+/**
+ * 二分求参数。`increasing` 说明该参数把指标往哪个方向推 ——
+ * 不写清方向就会解出反号的结果（第一版把"边际太小"当成"该加大倍率"，
+ * 而倍率越大边际越小，于是解到了边界外）。
+ */
+function bisectNum(apply, lo, hi, want, measure, increasing, iters = 44) {
+  for (let i = 0; i < iters; i += 1) {
+    const mid = (lo + hi) / 2;
+    apply(mid);
+    const got = measure();
+    const tooBig = increasing ? got > want : got < want;
+    if (tooBig) hi = mid; else lo = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+function solveTargets() {
+  const { t1, t50, t300, sec } = targets();
+  const wantTtk = sec / (GCD_ME * MOBS_PER_FIGHT);
+  /* 1) 怪血量总倍率 → 定第 1 层的**时长**（倍率越大越磨，边际也越小） */
+  MOB_HP_MUL = bisectNum((v) => { MOB_HP_MUL = v; }, 0.02, 60, wantTtk, () => ttkAt(1), true);
+  /* 2) 玩家生命总倍率 → 定第 1 层的**边际**。它不碰 ttk，所以不会破坏上一步 */
+  PLR_HP_MUL = bisectNum((v) => { PLR_HP_MUL = v; }, 0.05, 200, t1, () => marginAt(1), true);
+  /* 3) 1–50 层线性系数 → 让第 50 层的时长仍等于目标（TTK 逐层恒定） */
+  MOB_LIN_HP = bisectNum((v) => { MOB_LIN_HP = v; }, 0.0005, 0.90, wantTtk, () => ttkAt(50), true);
+  /* 3.5) 玩家生命层数成长 → 让第 50 层的边际等于目标。放在 LIN 之后：
+          它只改玩家生命，不动 ttk，所以不会回头破坏第 3 步 */
+  PLR_HP_POW = bisectNum((v) => { PLR_HP_POW = v; }, -2, 3, t50, () => marginAt(50), true);
+  /* 4) 无尽底数 → 让第 300 层的边际等于目标。
+        ⚠ 但它同时也在改第 300 层的时长 —— 见下面的冲突报告 */
+  MOB_END_BASE = bisectNum((v) => { MOB_END_BASE = v; }, 1.0005, 1.80, t300, () => marginAt(300), false);
+  return { t1, t50, t300, sec, wantTtk };
+}
+
+/**
+ * 全程扫描 —— 反解只保证 3 个控制点命中，**控制点之间没人看守**。
+ * 玩家实测到的正是这个：回显三个点全 ✓，可第 10 层边际掉到 ×1.25（无容错）。
+ * 所以必须扫一遍 1~300，把最差的那一层揪出来，而不是只报控制点。
+ */
+function sweep() {
+  let worstMargin = { f: 1, v: Infinity }, bestMargin = { f: 1, v: 0 };
+  let worstTtk = { f: 1, dev: 0 };
+  const wantTtk = ttkTarget();
+  for (let f = 1; f <= 300; f += 1) {
+    const F = fightModel(model(f, 'proposal'));
+    if (Number.isFinite(F.margin)) {
+      if (F.margin < worstMargin.v) worstMargin = { f, v: F.margin };
+      if (F.margin > bestMargin.v) bestMargin = { f, v: F.margin };
+    }
+    if (Number.isFinite(F.ttk) && wantTtk > 0) {
+      const dev = Math.abs(F.ttk / wantTtk - 1);
+      if (dev > worstTtk.dev) worstTtk = { f, dev, ttk: F.ttk };
+    }
+  }
+  return { worstMargin, bestMargin, worstTtk, wantTtk };
+}
+
+/**
+ * 冲突检测 —— 这一条是本次建模里最值得知道的结论。
+ *
+ * 无尽段：ttk ∝ (mobEnd/plrEnd)^250，margin ∝ (plrEnd/mobEnd)^500。
+ * 两者**只由同一个比值 r = mobEnd/plrEnd 决定**，所以"深层时长恒定"与
+ * "深层边际恒定"是一个自由度上的两个目标 —— 一般不能同时满足。
+ * 要同时满足，必须再拆一个自由度出来：让玩家的生命成长与攻击成长
+ * 用**不同**的底数（现在共用 growthFP，所以拆不开）。
+ */
+function solveConflict() {
+  const { wantTtk } = targets();
+  const t300 = ttkAt(300);
+  if (!Number.isFinite(t300) || !Number.isFinite(wantTtk) || wantTtk <= 0) return null;
+  const drift = t300 / wantTtk - 1;
+  if (Math.abs(drift) <= 0.25) return null;
+  return { drift, t300, wantTtk };
+}
+
+/* ── 边际曲线图 ─────────────────────────────────────────── */
+const cv2 = document.getElementById('cv2');
+const ctx2 = cv2.getContext('2d');
+function targetMargin(f) {
+  const { t1, t50, t300 } = targets();
+  // 目标曲线用对数插值：层数跨度大，线性插值会让 51→300 段看起来"突然塌下去"
+  const lerp = (a, b, k) => a + (b - a) * k;
+  if (f <= 50) return lerp(t1, t50, Math.log10(1 + f * 0.02) / Math.log10(1 + 50 * 0.02));
+  return lerp(t50, t300, Math.log10(1 + (f - 50) * 0.06) / Math.log10(1 + 250 * 0.06));
+}
+function drawMarginChart() {
+  const W = cv2.width, H = cv2.height, pad = { l: 46, r: 12, t: 10, b: 24 };
+  ctx2.clearRect(0, 0, W, H);
+  const maxF = 300, maxM = 6;
+  const X = (f) => pad.l + (f / maxF) * (W - pad.l - pad.r);
+  const Y = (v) => H - pad.b - Math.min(1, Math.max(0, v / maxM)) * (H - pad.t - pad.b);
+  ctx2.font = '11px monospace';
+  for (let v = 0; v <= maxM; v += 1) {
+    ctx2.strokeStyle = '#21262d'; ctx2.beginPath();
+    ctx2.moveTo(pad.l, Y(v)); ctx2.lineTo(W - pad.r, Y(v)); ctx2.stroke();
+    ctx2.fillStyle = '#8b949e'; ctx2.fillText(`×${v}`, 12, Y(v) + 4);
+  }
+  // 健康区
+  ctx2.fillStyle = 'rgba(63,185,80,.10)';
+  ctx2.fillRect(pad.l, Y(TARGET.marginMax), W - pad.l - pad.r, Y(TARGET.marginMin) - Y(TARGET.marginMax));
+  // 必输线
+  ctx2.strokeStyle = '#f85149'; ctx2.setLineDash([4, 3]); ctx2.beginPath();
+  ctx2.moveTo(pad.l, Y(1)); ctx2.lineTo(W - pad.r, Y(1)); ctx2.stroke(); ctx2.setLineDash([]);
+  ctx2.fillStyle = '#f85149'; ctx2.fillText('×1 必输线', pad.l + 6, Y(1) - 4);
+  // 目标曲线
+  ctx2.strokeStyle = '#d29922'; ctx2.lineWidth = 2; ctx2.setLineDash([5, 4]); ctx2.beginPath();
+  for (let f = 1; f <= maxF; f += 1) { const v = targetMargin(f); f === 1 ? ctx2.moveTo(X(f), Y(v)) : ctx2.lineTo(X(f), Y(v)); }
+  ctx2.stroke(); ctx2.setLineDash([]);
+  // 实际曲线（按当前模式；求解针对提案，切到别的模式时这条会偏离，正是想让你看见）
+  ctx2.strokeStyle = MODES[mode].color; ctx2.lineWidth = 2.4; ctx2.beginPath();
+  let first = true;
+  for (let f = 1; f <= maxF; f += 1) {
+    const v = fightModel(model(f, mode)).margin;
+    const y = Number.isFinite(v) ? Y(v) : Y(maxM);
+    if (first) { ctx2.moveTo(X(f), y); first = false; } else ctx2.lineTo(X(f), y);
+  }
+  ctx2.stroke();
+  const cur = fightModel(model(state().floor, mode)).margin;
+  ctx2.fillStyle = '#fff'; ctx2.beginPath();
+  ctx2.arc(X(state().floor), Number.isFinite(cur) ? Y(cur) : Y(maxM), 4, 0, 7); ctx2.fill();
+  ctx2.strokeStyle = '#d8dee9'; ctx2.beginPath();
+  ctx2.moveTo(X(state().floor), pad.t); ctx2.lineTo(X(state().floor), H - pad.b); ctx2.stroke();
+  for (const f of [50, 100, 200, 300]) { ctx2.fillStyle = '#8b949e'; ctx2.fillText(`第${f}`, X(f) - 12, H - 6); }
+}
+
+/* ── 面板与日志 ─────────────────────────────────────────── */
+function render() {
+  // 先反解，再画——面板与诊断都要反映"解出来的配置"，顺序反了会显示旧值
+  const want = solveTargets();
+  const { floor, crit } = state();
+  const m = model(floor, mode);
+  document.getElementById('floorV').textContent = floor;
+  document.getElementById('critV').textContent = crit.toFixed(1);
+  document.getElementById('syncV').textContent = sync.toFixed(2);
+  document.getElementById('fTitle').textContent = floor;
+  document.getElementById('pAtk').textContent = dispRaw(playerAtkFP(floor));
+  document.getElementById('mHp').textContent = dispRaw(m.mobHp);
+  document.getElementById('mAtk').textContent = dispRaw(m.mobAtk);
+  document.getElementById('mDef').textContent = `${dispRaw(m.mobDef)} / ${((1 - fpNum(m.mitFP)) * 100).toFixed(1)}% 减免`;
+  document.getElementById('critDmg').textContent = dispRaw(m.critDmg);
+  document.getElementById('raw').textContent = dispRaw(m.critDmg);
+  document.getElementById('abbr').textContent = disp(m.critDmg);
+
+  // 两条 TTK 都要看：只有一条在健康区间不叫平衡
+  /* 面板把**安全边际**放第一位：它是胜负判据，刀数只是解释"为什么"的线索。
+     上一版只并排显示两条各自判区间的刀数，于是"26 刀 vs 扛 8 刀"这种
+     必输组合能同时显示成一个 ⚠ 一个 ✓ —— 那是彻底的误导。 */
+  const ttkEl = document.getElementById('ttk');
+  const F = fightModel(m);
+  const marginTxt = !Number.isFinite(F.margin) ? '∞' : `×${F.margin.toFixed(2)}`;
+  const marginGood = F.margin >= TARGET.marginMin && F.margin <= TARGET.marginMax;
+  const marginDead = F.margin < TARGET.marginFatalBelow;
+  ttkEl.className = `ttk ${marginDead ? 'dead' : marginGood ? 'good' : 'bad'}`;
+  ttkEl.innerHTML =
+    `安全边际 <b>${marginTxt}</b>（建议 ${TARGET.marginMin}~${TARGET.marginMax}）${marginDead ? ' ✗ 必输' : marginGood ? ' ✓' : ' ⚠'}<br />` +
+    `<span class="sub">打完 ${MOBS_PER_FIGHT} 只怪要 <b>${Number.isFinite(F.timeToKill) ? F.timeToKill.toFixed(0) : '∞'}</b>s · ` +
+    `玩家扛得住 <b>${Number.isFinite(F.timeToDie) ? F.timeToDie.toFixed(0) : '∞'}</b>s · ` +
+    `结束时约剩 <b>${(F.hpLeft * 100).toFixed(0)}%</b> 生命</span><br />` +
+    `<span class="sub">击杀 ${F.ttk === Infinity ? '∞' : big(m.ttk)} 刀 · 承受 ${F.ttkMe === Infinity ? '∞' : big(m.ttkMe)} 刀</span>`;
+
+  /* ── 诊断 ────────────────────────────────────────────
+   * 分级：⚠ danger（必须处理） / ● watch（值得留意） / ℹ info（常驻说明，单独区）
+   * 原则三条：
+   *  · 按**实际越界**报，不按"我猜哪个开关造成的"报 —— 逐个 if 新加旋钮就会漏（上一版就漏了
+   *    存活曲线与永久加成）
+   *  · ⚠ 与 ● 混在警告区；ℹ 绝不混进来（常驻说明会把真警告挤没，这是上一版的原罪）
+   *  · 一条都不触发时整块收起，让"干净"是看得见的
+   * ==================================================== */
+  const diag = diagnose(floor, m);
+  const kw = document.getElementById('kwarn');
+  // 标记由渲染层统一加，所以这里剥掉文本里可能自带的 ● / ⚠ ——
+  // 否则会出现"● ● 不缩写的精确整数…"这种重复符号
+  kw.innerHTML = diag.length === 0 ? '' : diag.map((d) =>
+    `<div class="dg dg-${d.level}">${d.level === 'danger' ? '⚠' : '●'} ${d.text.replace(/^\s*[●⚠]\s*/, '')}</div>`).join('');
+  kw.hidden = diag.length === 0;
+  const dn = diag.filter((d) => d.level === 'danger').length;
+  const wn = diag.filter((d) => d.level === 'watch').length;
+  document.getElementById('dgcount').textContent =
+    diag.length === 0 ? '诊断：全部通过' : `诊断：${dn} 项异常 · ${wn} 项需留意`;
+  document.getElementById('dgcount').className = `dgcount ${dn ? 'has-danger' : wn ? 'has-watch' : ''}`;
+
+  // 当前生效的开关状态：让每个 toggle 都有可见反馈（永久加成以前改完什么都不显示）
+  document.getElementById('state').textContent =
+    `模式 ${MODES[mode].label} · 防御K ${kScaling ? '跟随缩放' : '固定100'} · ` +
+    `永久加成 ${permMul ? '开（×' + fpNum(permFactorFP(floor)).toFixed(2) + '）' : '关'} · ` +
+    `同步度 ${sync.toFixed(2)} · 暴击 ×${state().crit.toFixed(1)}`;
+
+  const t0 = 0;
+  document.getElementById('log').innerHTML = [
+    `<li class="crit"><span class="t">3.20s</span><span class="ico">★</span><span>咏唱<span class="skill">【崩解】</span> → <span class="dst">深渊裁决者</span> 造成 <span class="amt">${disp(m.critDmg)}</span> 伤害 <span class="sfx">（暴击！）</span> <span class="sfx">附加[虚空印记×3]</span></span></li>`,
+    `<li><span class="t">5.60s</span><span class="ico">★</span><span>咏唱<span class="skill">【裂隙】</span> → <span class="dst">深渊裁决者</span> 造成 <span class="amt">${disp(m.dmg)}</span> 伤害 <span class="sfx">附加[虚空印记×1]</span></span></li>`,
+    `<li><span class="t">8.00s</span><span class="ico">✚</span><span><span class="sfx">[虹吸]</span> 序列编织者 回复 <span class="amt">${disp(m.dmg / 2n)}</span> 点生命</span></li>`,
+    `<li class="foe"><span class="t">8.80s</span><span class="ico">⌁</span><span><b>【深渊裁决者】</b>湮灭 击中你！造成 <span class="amt">${disp(m.mobAtk * 9n / 10n)}</span> 伤害</span></li>`,
+    `<li><span class="t">12.00s</span><span class="ico">★</span><span>咏唱<span class="skill">【突刺】</span> → <span class="dst">深渊裁决者</span> 造成 <span class="amt">${disp(m.dmg * 85n / 100n)}</span> 伤害</span></li>`,
+  ].join('');
+
+  // 求解结果回显：三个旋钮 + 实际打到的边际 vs 目标
+  const got = { 1: marginAt(1), 50: marginAt(50), 300: marginAt(300) };
+  const fmtM = (v) => (Number.isFinite(v) ? v.toFixed(2) : '∞');
+  const near = (a, b) => Math.abs(a - b) / Math.max(b, 0.01) < 0.03;
+  const fmtT = (v) => (Number.isFinite(v) ? v.toFixed(1) : '∞');
+  document.getElementById('solved').innerHTML =
+    `反解结果（5 个旋钮）：怪血总倍率 <b>×${MOB_HP_MUL.toFixed(3)}</b> · ` +
+    `怪血 1–50 层系数 <b>${MOB_LIN_HP.toFixed(4)}</b>（原 0.12）· ` +
+    `无尽底数 <b>${MOB_END_BASE.toFixed(4)}</b>（原 1.22）<br />` +
+    `玩家生命总倍率 <b>×${PLR_HP_MUL.toFixed(3)}</b> · ` +
+    `玩家生命层数幂 <b>f^${PLR_HP_POW >= 0 ? '+' : ''}${PLR_HP_POW.toFixed(2)}</b><br />` +
+    `控制点命中：第1层 <span class="${near(got[1], want.t1) ? '' : 'off'}">${fmtM(got[1])}</span>/${want.t1.toFixed(1)} · ` +
+    `第50层 <span class="${near(got[50], want.t50) ? '' : 'off'}">${fmtM(got[50])}</span>/${want.t50.toFixed(1)} · ` +
+    `第300层 <span class="${near(got[300], want.t300) ? '' : 'off'}">${fmtM(got[300])}</span>/${want.t300.toFixed(1)}<br />` +
+    (() => {
+      const sw = sweep();
+      const bad = sw.worstMargin.v < TARGET.marginMin || sw.bestMargin.v > TARGET.marginMax;
+      const ttkBad = sw.worstTtk.dev > 0.25;
+      return `<span class="${bad ? 'off' : ''}">全程最差边际 <b>×${fmtM(sw.worstMargin.v)}</b>（第 ${sw.worstMargin.f} 层）` +
+        ` · 最高 ×${fmtM(sw.bestMargin.v)}（第 ${sw.bestMargin.f} 层）</span>` +
+        `<span class="${ttkBad ? 'off' : ''}"> · 全程时长最大偏差 ${(sw.worstTtk.dev * 100).toFixed(0)}%（第 ${sw.worstTtk.f} 层` +
+        ` ${fmtT(sw.worstTtk.ttk)}刀 / 目标 ${fmtT(sw.wantTtk)}刀）</span>` +
+        `<br /><span class="note">反解只约束 3 个控制点，<b>中间段完全自由</b> —— 上面这行才是真结论。` +
+        `控制点全命中而中途掉进危险区，是这套方法的固有缺陷，不是 bug</span>`;
+    })() +
+    (mode === 'proposal' ? '' : `<br /><span class="off">⚠ 当前看的是「${MODES[mode].label}」，求解只针对提案模式 —— 曲线偏离是预期的</span>`) +
+    (() => {
+      const c = solveConflict();
+      if (c === null) return '';
+      return `<br /><span class="off">⚠ <b>深层目标冲突</b>：满足边际后第 300 层时长变成 ${c.t300.toFixed(1)} 刀` +
+        `（目标 ${c.wantTtk.toFixed(1)} 刀，偏 ${(c.drift * 100).toFixed(0)}%）。` +
+        `无尽段的时长与边际由<b>同一个比值</b>（怪底数÷玩家底数）控制，两个目标一般不能同时满足 —— ` +
+        `要么放弃其一，要么把玩家的生命成长与攻击成长拆成两条曲线</span>`;
+    })();
+
+  drawCurve();
+  drawMarginChart();
+}
+
+document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+  mode = b.dataset.mode;
+  document.querySelectorAll('[data-mode]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  render();
+}));
+document.getElementById('kfix').addEventListener('click', (e) => {
+  kScaling = !kScaling; e.target.setAttribute('aria-pressed', String(kScaling)); render();
+});
+document.getElementById('perm').addEventListener('click', (e) => {
+  permMul = !permMul; e.target.setAttribute('aria-pressed', String(permMul)); render();
+});
+document.getElementById('sync').addEventListener('input', (e) => {
+  sync = Number(e.target.value) / 100; render();
+});
+['floor', 'crit', 't1', 't50', 't300', 'tsec'].forEach((id) => document.getElementById(id).addEventListener('input', render));
+['t1', 't50', 't300'].forEach((id) => document.getElementById(id).addEventListener('input', () => {
+  document.getElementById(id + 'V').textContent = (Number(document.getElementById(id).value) / 10).toFixed(1);
+}));
+document.getElementById('tsec').addEventListener('input', (e) => {
+  document.getElementById('tsecV').textContent = `${e.target.value}s`;
+});
+// 标签必须与滑块实际值同步一次：否则 HTML 里写死的初始文字会与 value 属性漂移，
+// 用户没碰过滑块却看到"目标 2.7/2.0/2.5"，以为是自己设的
+['t1', 't50', 't300'].forEach((id) => {
+  document.getElementById(id + 'V').textContent = (Number(document.getElementById(id).value) / 10).toFixed(1);
+});
+document.getElementById('tsecV').textContent = `${document.getElementById('tsec').value}s`;
+document.getElementById('critV').textContent = (Number(document.getElementById('crit').value) / 10).toFixed(1);
+document.getElementById('syncV').textContent = (Number(document.getElementById('sync').value) / 100).toFixed(2);
+render();
+</script>
+</body>
+</html>

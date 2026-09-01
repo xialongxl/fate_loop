@@ -38,8 +38,8 @@ export function createDamageApply({ store, getRng, findEntity, pushLog, getBuffT
       return { dealt: 0, isCrit: false, targetHp: 0, lethal: false };
     }
 
-    // findEntity 不消费随机数，因此提到暂击判定之前不改变随机序列。
-    // 暂击率优先级：显式入参 > 源实体的 critChance（等级 + 装备派生）> 默认 15%。
+    // findEntity 不消费随机数，因此提到暴击判定之前不改变随机序列。
+    // 暴击率优先级：显式入参 > 源实体的 critChance（等级 + 装备派生）> 默认 15%。
     const source = findEntity(state, sourceId);
 
     let isCrit = false;

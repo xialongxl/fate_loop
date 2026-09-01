@@ -274,7 +274,7 @@ export const AFFIXES = Object.freeze([
   { id: 'maxHp', name: '生命', suffix: '' },
   { id: 'attack', name: '攻击', suffix: '' },
   { id: 'defense', name: '防御', suffix: '' },
-  { id: 'crit', name: '暂击', suffix: '%' },
+  { id: 'crit', name: '暴击', suffix: '%' },
 ]);
 
 /** 强化上限与费用曲线（货币为命运碎片）。 */

@@ -17,6 +17,7 @@ import {
   DEFAULT_OGCD_SLOTS,
 } from '../../src/main.js';
 import { battleFingerprint, officialModuleEntries } from '../helpers.js';
+import { filterHashOf } from '../../src/core/lootFilter.js';
 import { nullAudio } from '../../src/ui/audio/nullAudio.js';
 import { levelFromTotalExp, totalExpForLevel } from '../../src/core/progression.js';
 import { recalcPlayer } from '../../src/core/derived.js';
@@ -563,6 +564,58 @@ describe('战绩屏', () => {
     // 种子是复现整局的凭据，战绩卡必须把它显示出来
     expect(cards[0].textContent).toContain(String(SEED));
     void node;
+  });
+
+  /**
+   * 熔炼规则（P2）得在战绩里留痕。两个理由缺一不可：
+   *  - 不开熔炼的玩家一局拾到 30 件、开的只看到 5 件，不留痕就像“装备变少了”
+   *  - 同种子 + 不同规则 = 不同结果，那 8 位就是两人对战不上时的解释
+   */
+  it('开了自动熔炼 ⇒ 战绩卡写得出件数与规则指纹', async () => {
+    startRun(app);
+    app.flow.applyLootFilterPreset('epic_up');
+    app.store.update((draft) => {
+      draft.metadata.gearMelted = 4;
+      draft.metadata.shardsFromMelt = 33;
+    });
+
+    app.store.update((draft) => {
+      draft.player.gcdSequence = [];
+      draft.player.ogcdSlots = [];
+    });
+    const node = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.COMBAT);
+    standOn(app, node);
+    app.beginBattle();
+    app.setSpeed(SPEED_MODES.MAX);
+    click(must('.dialog-box [data-sum="primary"]'));
+
+    await tick();
+    click(must(`[data-nav="${SCREEN.HISTORY}"]`));
+    await tick();
+    const card = q(`${screenEl(SCREEN.HISTORY)} .history-card`);
+    expect(card).not.toBeNull();
+    expect(card.textContent).toContain('自动熔炼');
+    const hash = filterHashOf(app.snapshot().lootFilter);
+    expect(card.querySelector('.history-seed code[title]')?.textContent).toBe(hash);
+    expect(card.querySelector('.history-seed code[title]')?.getAttribute('title')).toContain('史诗');
+  });
+
+  it('没开熔炼 ⇒ 战绩卡不占地方（旧语义：off 对所有档都一样，写出来只是噪声）', async () => {
+    startRun(app);
+    app.store.update((draft) => {
+      draft.player.gcdSequence = [];
+      draft.player.ogcdSlots = [];
+    });
+    const node = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.COMBAT);
+    standOn(app, node);
+    app.beginBattle();
+    app.setSpeed(SPEED_MODES.MAX);
+    click(must('.dialog-box [data-sum="primary"]'));
+    await tick();
+    click(must(`[data-nav="${SCREEN.HISTORY}"]`));
+    await tick();
+    const card = q(`${screenEl(SCREEN.HISTORY)} .history-card`);
+    expect(card.textContent).not.toContain('熔炼 ');
   });
 });
 

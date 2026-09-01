@@ -2455,6 +2455,125 @@ code {
   top: 0;
 }
 
+/* ---- 自动熔炼面板（P2）----
+   右格从「一块面板」变成「详情 + 规则」两叠：详情是 sticky 的，
+   规则面板跟着它后面，两件事在同一个视线里（刚拾到东西→会不会被熔）。 */
+.equip-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.filter-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.filter-summary {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--accent);
+  /* 规则摘要能长到两三行：不折行就会撞破面板右边（ui:audit 量过的那类） */
+  overflow-wrap: anywhere;
+}
+
+.filter-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.filter-rules {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* dl 里每行是 dt+dd 包在 div 里：不给 .filter-row 定 flex，
+   dt/dd 会塌成“一行一个词”（ui:audit 专门量 dt/dd 同排就是为这个） */
+.filter-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-row.is-global .filter-label {
+  color: var(--accent);
+}
+
+/* 复选那一行只一个控件：不该跟着上面的“两个下拉 + 一个数”一起折行 */
+.filter-row.is-check .filter-controls {
+  flex-wrap: nowrap;
+}
+
+.filter-label {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.filter-controls {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+
+.filter-input {
+  min-width: 0;
+  /* 42px 是窄视口（420px 那一档）不溢出的上限：品质名与“不限”都是三字内 */
+  flex: 0 1 auto;
+  max-width: 84px;
+  padding: 2px 4px;
+  font-size: 11.5px;
+}
+
+input[type="number"].filter-input {
+  width: 56px;
+  max-width: 56px;
+}
+
+.filter-clear {
+  padding: 2px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.filter-check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.filter-check input {
+  flex: 0 0 auto;
+  margin: 0;
+}
+
+.filter-hint {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.filter-stats {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
 .battle-player .seq-track {
   padding-top: 4px;
   border-top: 1px dotted var(--border);

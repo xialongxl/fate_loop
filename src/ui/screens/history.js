@@ -119,6 +119,8 @@ export function createHistoryScreen({ listHistory, getSnapshot, onOpenCodex, onB
           <div><dt>总治疗</dt><dd>${formatNumber(entry.totalHeal)}</dd></div>
           <div><dt>碎片</dt><dd>${formatNumber(entry.shardsEarned)}</dd></div>
           <div><dt>装备</dt><dd>${entry.gearFound ?? 0} 件</dd></div>
+          <!-- 熔炼（P2）：开了规则时“装备 3 件”会与“背包一件没有”并存，不说清就像掉了东西 -->
+          <div><dt>自动熔炼</dt><dd>${entry.gearMelted ?? 0} 件</dd></div>
           <div><dt>战斗耗时</dt><dd>${((entry.virtualTimeMs ?? 0) / 1000).toFixed(2)}s</dd></div>
         </dl>
         <p class="history-seq">${sequence} 个 GCD · ${ogcd} 个 oGCD</p>
@@ -128,6 +130,15 @@ export function createHistoryScreen({ listHistory, getSnapshot, onOpenCodex, onB
             entry.contentHash === undefined || entry.contentHash === null
               ? ''
               : ` · 内容 <code>${escapeHtml(String(entry.contentHash))}</code>`
+          }
+          ${
+            // 熔炼规则指纹（P2）：同种子不同规则会打出不同结果，这 8 位就是那个解释。
+            // 没开规则时不占地方（off 的哈希对所有旧档都一样，写出来只显噪声）。
+            entry.lootFilterHash === undefined ||
+            entry.lootFilterHash === null ||
+            entry.lootFilterSummary === '不自动熔炼'
+              ? ''
+              : ` · 熔炼 <code title="${escapeHtml(String(entry.lootFilterSummary ?? ''))}">${escapeHtml(String(entry.lootFilterHash))}</code>`
           }
         </p>
       </li>`;

@@ -8,9 +8,13 @@
  * 自动战斗游戏里玩家唯一的决策是「换不换」，把差值直接摊开比让玩家心算好。
  */
 
-import { EQUIP_SLOTS, EQUIP_SLOT_NAMES, ENHANCE_MAX, INVENTORY_CAPACITY } from '../../core/constants.js';
+import { AFFIXES, EQUIP_SLOTS, EQUIP_SLOT_NAMES, ENHANCE_MAX, INVENTORY_CAPACITY, RARITIES } from '../../core/constants.js';
 import { describeGear, enhanceCost, rarityOf, salvageValue } from '../../core/equipment.js';
+import { FILTER_GROUPS, LOOT_FILTER_PRESETS, filterSummary, normalizeLootFilter, presetKeyOf } from '../../core/lootFilter.js';
 import { escapeHtml, formatNumber } from '../format.js';
+
+/** 部位组的中文名（与 slotKind 同一套分类，不新增真相）。 */
+const GROUP_LABELS = Object.freeze({ weapon: '武器', armor: '防具', accessory: '首饰' });
 
 export function createEquipmentScreen({
   getState,
@@ -19,6 +23,9 @@ export function createEquipmentScreen({
   onSalvage,
   onEnhance,
   onToast,
+  onFilterPatch = null,
+  onFilterPreset = null,
+  onFilterPreview = null,
 }) {
   const element = document.createElement('section');
   element.className = 'screen-equipment';
@@ -51,10 +58,31 @@ export function createEquipmentScreen({
         <ul class="bag-list" data-slot="bag"></ul>
       </section>
 
+      <div class="equip-side">
       <section class="panel equip-detail-panel">
         <h3 class="panel-title">详情</h3>
         <div data-slot="detail"><p class="panel-note">选择一件装备查看详情与对比。</p></div>
       </section>
+
+      <!-- 自动熔炼（P2）。放在详情下面而不是设个新屏：玩家改这条规则的时机
+           就是“刚抬到一件东西、想知道它会不会被熔掉”的时候。 -->
+      <section class="panel filter-panel">
+        <div class="panel-title-row">
+          <h3 class="panel-title">自动熔炼</h3>
+          <span class="panel-count" data-slot="filter-state"></span>
+        </div>
+        <p class="filter-summary" data-slot="filter-summary"></p>
+        <div class="filter-tools">
+          <label class="visually-hidden" for="filter-preset">熔炼预设</label>
+          <select id="filter-preset" data-slot="filter-preset"></select>
+          <button type="button" class="btn-ghost" data-act="filter-preview">试算背包</button>
+        </div>
+        <dl class="filter-rules" data-slot="filter-rules"></dl>
+        <p class="panel-note filter-hint">熔炼发生在抬到装备的那一瞬间，不可撤销；
+          它不影响拾取到什么（掉落早就在独立子流里 roll 完了），只影响谁进背包。</p>
+        <p class="filter-stats" data-slot="filter-stats"></p>
+      </section>
+      </div>
     </div>
   `;
 
@@ -66,6 +94,11 @@ export function createEquipmentScreen({
     bagCount: element.querySelector('[data-slot="bag-count"]'),
     detail: element.querySelector('[data-slot="detail"]'),
     sort: element.querySelector('[data-slot="sort"]'),
+    filterState: element.querySelector('[data-slot="filter-state"]'),
+    filterSummary: element.querySelector('[data-slot="filter-summary"]'),
+    filterPreset: element.querySelector('[data-slot="filter-preset"]'),
+    filterRules: element.querySelector('[data-slot="filter-rules"]'),
+    filterStats: element.querySelector('[data-slot="filter-stats"]'),
   };
 
   let selectedId = null;
@@ -264,12 +297,198 @@ export function createEquipmentScreen({
     renderTotal(state);
     renderBag(state);
     renderDetail(state);
+    renderFilter(state);
+  }
+
+  // ============================================================
+  // 自动熔炼面板（P2）
+  //
+  // 控件只写“该改哪条规则”，不自己算规则：写回一律走 GameFlow#setLootFilter，
+  // 而规则本体由 core/lootFilter.js 规范化 —— 面板里不重复杂一份业务判断。
+  // ============================================================
+
+  const RARITY_OPTIONS = RARITIES.map((rarity, index) => ({ index, name: rarity.name }));
+
+  function selectHtml(field, value, group) {
+    const scope = group === null ? '' : ` data-filter-group="${group}"`;
+    return `
+      <select class="filter-input" data-filter-field="${field}"${scope}>
+        ${
+          field === 'minRarity'
+            ? RARITY_OPTIONS.map(
+                (option) =>
+                  `<option value="${option.index}"${Number(value) === option.index ? ' selected' : ''}>${option.name}</option>`,
+              ).join('')
+            : [
+                { id: '', label: '不限' },
+                ...AFFIXES.map((affix) => ({ id: affix.id, label: affix.name })),
+              ]
+                .map(
+                  (option) =>
+                    `<option value="${option.id}"${(value ?? '') === option.id ? ' selected' : ''}>${option.label}</option>`,
+                )
+                .join('')
+        }
+      </select>`;
+  }
+
+  function numberHtml(field, value, group, affixId) {
+    const scope = group === null ? '' : ` data-filter-group="${group}"`;
+    const disabled = affixId === null || affixId === undefined || affixId === '' ? ' disabled' : '';
+    const step = affixId === 'crit' ? '1' : '1';
+    return `<input class="filter-input" type="number" min="0" step="${step}" value="${Number(value) || 0}"${disabled} data-filter-field="${field}"${scope}>`;
+  }
+
+  function ruleRowHtml(label, rule, group) {
+    const safe = rule ?? { minRarity: 0, requireAffix: null, minAffixValue: 0 };
+    return `
+      <div class="filter-row${group === null ? ' is-global' : ''}">
+        <dt class="filter-label">${label}</dt>
+        <dd class="filter-controls">
+          ${selectHtml('minRarity', safe.minRarity, group)}
+          ${selectHtml('requireAffix', safe.requireAffix ?? '', group)}
+          ${numberHtml('minAffixValue', safe.minAffixValue, group, safe.requireAffix)}
+          ${
+            group === null
+              ? ''
+              : `<button type="button" class="btn-ghost filter-clear" data-filter-clear="${group}">用全局</button>`
+          }
+        </dd>
+      </div>`;
+  }
+
+  function renderFilter(state) {
+    const filter = normalizeLootFilter(state.lootFilter);
+    const key = presetKeyOf(filter);
+
+    slots.filterState.textContent = filter.enabled ? '已开启' : '未开启';
+    slots.filterSummary.textContent = filterSummary(filter);
+
+    slots.filterPreset.innerHTML = [...LOOT_FILTER_PRESETS, key === 'custom' ? { id: 'custom', name: '自定义（当前）' } : null]
+      .filter(Boolean)
+      .map((preset) => `<option value="${preset.id}"${preset.id === key ? ' selected' : ''}>${preset.name}</option>`)
+      .join('');
+    slots.filterPreset.title = LOOT_FILTER_PRESETS.map((p) => `${p.name}：${p.note}`).join('\n');
+
+    slots.filterRules.innerHTML = [
+      ruleRowHtml('全局', filter, null),
+      ...FILTER_GROUPS.map((group) =>
+        ruleRowHtml(`${GROUP_LABELS[group]}例外`, filter.groups[group] ?? null, group),
+      ),
+      `
+      <div class="filter-row is-check">
+        <dt class="filter-label">过渡装保护</dt>
+        <dd class="filter-controls">
+          <label class="filter-check">
+            <input type="checkbox" data-filter-field="keepIfBetterThanEquipped"${filter.keepIfBetterThanEquipped ? ' checked' : ''}>
+            <span>评分高于身上那件就必留</span>
+          </label>
+        </dd>
+      </div>`,
+    ].join('');
+
+    const melted = state.metadata?.gearMelted ?? 0;
+    const gained = state.metadata?.shardsFromMelt ?? 0;
+    slots.filterStats.textContent =
+      melted > 0
+        ? `本局已自动熔炼 ${melted} 件，回收 ${formatNumber(gained)} 枚碎片`
+        : '本局还没自动熔炼过装备';
+  }
+
+  /** 改一条规则（全局或某个部位组）。 */
+  function patchFilter(field, group, rawValue) {
+    if (onFilterPatch === null) return;
+    const state = getState();
+    const filter = normalizeLootFilter(state.lootFilter);
+
+    if (field === 'keepIfBetterThanEquipped') {
+      onFilterPatch({ keepIfBetterThanEquipped: rawValue === true, enabled: filter.enabled });
+      render();
+      return;
+    }
+
+    const nextRule = {
+      minRarity: field === 'minRarity' ? Number(rawValue) : (currentRule(filter, group) ?? {}).minRarity ?? 0,
+      requireAffix:
+        field === 'requireAffix'
+          ? rawValue === ''
+            ? null
+            : rawValue
+          : ((currentRule(filter, group) ?? {}).requireAffix ?? null),
+      minAffixValue:
+        field === 'minAffixValue'
+          ? Math.max(0, Number(rawValue) || 0)
+          : ((currentRule(filter, group) ?? {}).minAffixValue ?? 0),
+    };
+
+    if (group === null) {
+      onFilterPatch({ ...nextRule, enabled: filter.enabled || nextRule.minRarity > 0 || nextRule.requireAffix !== null });
+    } else {
+      const groups = { ...filter.groups, [group]: nextRule };
+      onFilterPatch({ groups, enabled: filter.enabled });
+    }
+    render();
+  }
+
+  function currentRule(filter, group) {
+    if (group === null) {
+      return { minRarity: filter.minRarity, requireAffix: filter.requireAffix, minAffixValue: filter.minAffixValue };
+    }
+    return filter.groups[group] ?? null;
+  }
+
+  function clearGroup(group) {
+    if (onFilterPatch === null) return;
+    const filter = normalizeLootFilter(getState().lootFilter);
+    const groups = { ...filter.groups };
+    delete groups[group];
+    onFilterPatch({ groups });
+    render();
+  }
+
+  function previewMelt() {
+    if (onFilterPreview === null) return;
+    const result = onFilterPreview();
+    const names = result.melted.slice(0, 3).map((item) => item.gear.name).join('、');
+    const more = result.melted.length > 3 ? ' …' : '';
+    // 件数放最前：玩家要知道的是“这次会没掉多少”，名字只是样本。
+    slots.filterStats.textContent =
+      result.melted.length === 0
+        ? '试算：按当前规则，背包里一件都不会被熔掉'
+        : `试算：会熔掉 ${result.melted.length} 件（${names}${more}），回收 ${formatNumber(result.shards)} 枚碎片`;
+    onToast?.('试算完成（没有改动任何东西）', 'info');
   }
 
   slots.sort.addEventListener('change', render);
 
+  // 熔炼面板的控件：change 而不是 click —— checkbox / select / number 都靠它
+  element.addEventListener('change', (event) => {
+    const target = event.target;
+    if (target.getAttribute?.('data-slot') === 'filter-preset') {
+      onFilterPreset?.(target.value);
+      render();
+      return;
+    }
+    const field = target.closest?.('[data-filter-field]')?.getAttribute('data-filter-field');
+    if (field === null || field === undefined) return;
+    const group = target.closest('[data-filter-field]').getAttribute('data-filter-group');
+    const value = field === 'keepIfBetterThanEquipped' ? target.checked : target.value;
+    patchFilter(field, group === null || group === '' ? null : group, value);
+  });
+
   element.addEventListener('click', (event) => {
     const target = event.target;
+
+    const clearGroup_ = target.closest?.('[data-filter-clear]')?.getAttribute('data-filter-clear');
+    if (clearGroup_ !== null && clearGroup_ !== undefined) {
+      clearGroup(clearGroup_);
+      return;
+    }
+
+    if (target.getAttribute?.('data-act') === 'filter-preview') {
+      previewMelt();
+      return;
+    }
 
     const selectId = target.closest?.('[data-select]')?.getAttribute('data-select');
     if (selectId !== null && selectId !== undefined) {

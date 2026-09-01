@@ -246,8 +246,20 @@ try {
           console.error(`   ${screen} ${view}：浏览器零输出（实例可能被上一个接管，或启动失败）`);
           continue;
         }
-        failures += 1;
-        results.push({ screen, view, ok: false, problems: ['没拿到体检结果（页面报错或超时）'], metrics: {} });
+        /**
+         * 有 DOM 但没拿到结果 —— 也是**环境问题**，不是排版问题。
+         *
+         * 为什么不能算成 UI 缺陷：harness 现在已经把脚手架包在 try 里，
+         * 页面报错/用例跑坏都会自己写一条带原因的 JSON 出来（=真失败）。
+         * 所以走到这里只剩两种可能：虚拟时间没烧完、或者浏览器实例不对。
+         * 实测过：跑 42 个组合时偶尔一个实例只拉到 stderr 噪音与半截 DOM，
+         * 单独 --only 重跑又全绿 —— 把它报成"界面有问题"会把人指到错方向。
+         */
+        envFailures += 1;
+        console.error(
+          `   ${screen} ${view}：页面没跑完（没拿到体检 JSON）—— 按环境问题处理，不算布局缺陷。` +
+            '重跑确认：npm run ui:audit -- --only=' + String(screen) + ' --views=' + String(view),
+        );
         console.error(`   stderr: ${stderr.split('\n').slice(0, 2).join(' ')}`);
         continue;
       }
@@ -279,8 +291,9 @@ try {
 
 if (envFailures > 0) {
   console.error(
-    `\n\x1b[31m环境问题\x1b[0m：${envFailures} 个组合浏览器零输出，结果不可信。` +
-      '这不是布局问题 —— 先查是不是有残留浏览器实例抢占了 profile。',
+    `\n\x1b[31m环境问题\x1b[0m：${envFailures} 个组合没拿到可信结果（零输出或页面未跑完），` +
+      '结果不可信。这不是布局问题 —— 先查是不是有残留浏览器实例抢占了 profile，' +
+      '再拿上面提示的 --only/--views 单独重跑那几组。',
   );
   process.exit(3);
 }

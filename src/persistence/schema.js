@@ -16,6 +16,7 @@
 
 import { AUTO_SAVE_SLOT, MANUAL_SAVE_SLOTS, SCHEMA_VERSION } from '../core/constants.js';
 import { permanentBonusOf } from '../core/derived.js';
+import { filterHashOf, filterSummary, normalizeLootFilter } from '../core/lootFilter.js';
 import { setToArray } from '../utils/serialize.js';
 import { FateError } from '../utils/invariant.js';
 
@@ -94,9 +95,20 @@ export function serializeRun(state) {
     equipment,
     inventory: state.player.inventory.map(serializeGear),
 
+    /**
+     * 熔炼规则（P2）。存规则本体而不是只存哈希：读档要能**恢复当时的行为**。
+     * 哈希另记一份是为了在列表里一眼看出“这两份档用的不是同一套规则”。
+     * 旧 v2 档缺这个字段 → normalize 兼平为「不自动熔炼」，所以不升 schema 版本。
+     */
+    lootFilter: normalizeLootFilter(state.lootFilter),
+    lootFilterHash: filterHashOf(state.lootFilter),
+
     fateShards: state.fateShards,
     // 通关标记（P1-6）。老存档缺它按 false 处理：那时还没有终点层这回事
     victoryAchieved: state.victoryAchieved === true,
+    /** 熔炼规则（P2）：规则会变背包→变属性→变后续战斗，所以它属于这一局的凭据 */
+    lootFilter: normalizeLootFilter(state.lootFilter),
+    lootFilterHash: filterHashOf(state.lootFilter),
     shopPurchases: [...state.shopStates.entries()]
       .map(([nodeId, shop]) => [nodeId, setToArray(shop.purchasedIds)])
       .sort((a, b) => (a[0] < b[0] ? -1 : 1)),
@@ -132,6 +144,9 @@ export function summarizeSave(record) {
     // 存档时那一局的内容指纹（记录级字段，不在 run data 里）
     contentHash: record.contentHash ?? null,
     contentMods: record.contentMods ?? [],
+    /** 熔炼规则（P2）：存档列表上能看出“这份档是开着自动熔炼打的” */
+    lootFilterHash: save.lootFilterHash ?? null,
+    lootFilterSummary: save.lootFilter ? filterSummary(save.lootFilter) : null,
     seed: save.seed,
     floorNumber: save.floorNumber,
     exp: save.exp ?? 0,
@@ -160,6 +175,11 @@ export function createHistoryEntry(state, { outcome }) {
     shardsEarned: state.metadata.shardsEarned,
     expEarned: state.metadata.expEarned ?? 0,
     gearFound: state.metadata.gearFound ?? 0,
+    /** 自动熔炼的账（P2）：一局熔了几件、换了多少碎片 */
+    gearMelted: state.metadata.gearMelted ?? 0,
+    shardsFromMelt: state.metadata.shardsFromMelt ?? 0,
+    lootFilterHash: filterHashOf(state.lootFilter),
+    lootFilterSummary: filterSummary(state.lootFilter),
     /** 本局是否先通关过再死在无尽里。历史界面据此标「通关后 · 无尽」。 */
     victoryAchieved: state.victoryAchieved === true,
     gcdSequence: [...state.player.gcdSequence],

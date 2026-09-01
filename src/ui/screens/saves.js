@@ -108,6 +108,12 @@ export function createSavesScreen({
                 ? ` · 内容 <code>${escapeHtml(String(slot.contentHash))}</code>`
                 : ''
             }
+            ${
+              // 熔炼规则（P2）：只看摘要，没开就不占地方
+              !slot.lootFilterHash || slot.lootFilterSummary === '不自动熔炼'
+                ? ''
+                : ` · 熔炼 <code title="${escapeHtml(String(slot.lootFilterSummary ?? ''))}">${escapeHtml(String(slot.lootFilterHash))}</code>`
+            }
             ${foreign ? '<span class="slot-tag is-warn">与当前内容集不符</span>' : ''}
           </p>
         </div>

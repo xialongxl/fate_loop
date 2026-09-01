@@ -54,6 +54,24 @@ function must(sel) {
   return el;
 }
 
+/**
+ * 往背包塞几件可控属性的装备（两个装备相关的 describe 共用）。
+ * forceRarity ⇒ 不看掉落曲线，测试才不会随曲线调参漂。
+ */
+function stock(items) {
+  app.store.update((draft) => {
+    draft.player.inventory = items.map(({ idSuffix, slot, rarity }) =>
+      rollEquipment({
+        rng: mulberry32(rarity * 31 + slot.length),
+        floorNumber: 3,
+        idSuffix,
+        forceSlot: slot,
+        forceRarity: rarity,
+      }),
+    );
+  });
+}
+
 let app;
 
 /** 进一局并切到指定屏幕。 */
@@ -225,21 +243,6 @@ function text(sel) {
 // ============================================================
 
 describe('装备屏交互', () => {
-  /** 往背包塞几件可控属性的装备。 */
-  function stock(items) {
-    app.store.update((draft) => {
-      draft.player.inventory = items.map(({ idSuffix, slot, rarity }) =>
-        rollEquipment({
-          rng: mulberry32(rarity * 31 + slot.length),
-          floorNumber: 3,
-          idSuffix,
-          forceSlot: slot,
-          forceRarity: rarity,
-        }),
-      );
-    });
-  }
-
   beforeEach(async () => {
     await openAt(SCREEN.EQUIPMENT);
   });
@@ -336,6 +339,101 @@ describe('装备屏交互', () => {
 
     const slotOrder = setSort('slot').map((g) => EQUIP_SLOTS.indexOf(g.slot));
     expect([...slotOrder].sort((a, b) => a - b)).toEqual(slotOrder);
+  });
+});
+
+// ============================================================
+// 自动熔炼面板（P2）
+//
+// 面板存在的意义是"玩家能把自己的意图写成规则"，所以这里测的是
+// **改一个控件 → 状态里真的变了 → 显示也跟着变**，而不只是"有这些控件"。
+// 特别要测两个会骗人的地方：预设下拉在改过之后必须说「自定义」，
+// 而「试算」必须**什么都不改**。
+// ============================================================
+
+describe('装备屏 · 自动熔炼面板', () => {
+  const EQUIP = () => root(SCREEN.EQUIPMENT);
+
+  beforeEach(async () => {
+    await openAt(SCREEN.EQUIPMENT);
+  });
+
+  const setSelect = (element, value) => {
+    element.value = value;
+    element.dispatchEvent(new window.Event('change', { bubbles: true }));
+  };
+
+  it('默认是「不自动熔炼」，而且预设一个不少', () => {
+    expect(q(`${EQUIP()} [data-slot="filter-state"]`).textContent).toBe('未开启');
+    expect(q(`${EQUIP()} [data-slot="filter-summary"]`).textContent).toContain('不自动熔炼');
+    const options = qa(`${EQUIP()} [data-slot="filter-preset"] option`);
+    expect(options.map((o) => o.value)).toEqual(['off', 'junk', 'epic_up', 'crit_jewelry']);
+  });
+
+  it('选预设 ⇒ 状态真的变了，摘要跟着说人话', () => {
+    setSelect(q(`${EQUIP()} [data-slot="filter-preset"]`), 'epic_up');
+    const filter = app.snapshot().lootFilter;
+    expect(filter.enabled).toBe(true);
+    expect(filter.minRarity).toBe(4);
+    expect(q(`${EQUIP()} [data-slot="filter-state"]`).textContent).toBe('已开启');
+    expect(q(`${EQUIP()} [data-slot="filter-summary"]`).textContent).toContain('史诗');
+  });
+
+  it('手改一格就脱离预设（下拉框不许接着说瞎话）', () => {
+    setSelect(q(`${EQUIP()} [data-slot="filter-preset"]`), 'junk');
+    const raritySelect = q(`${EQUIP()} [data-filter-field="minRarity"]`);
+    setSelect(raritySelect, '6');
+    const values = qa(`${EQUIP()} [data-slot="filter-preset"] option`).map((o) => o.value);
+    expect(values).toContain('custom');
+    expect(q(`${EQUIP()} [data-slot="filter-preset"]`).value).toBe('custom');
+    expect(app.snapshot().lootFilter.minRarity).toBe(6);
+  });
+
+  it('部位组例外能加上也能退回「用全局」', () => {
+    const armorSelect = qa(`${EQUIP()} [data-filter-group="armor"]`)[0];
+    expect(armorSelect).toBeTruthy();
+    setSelect(armorSelect, '5');
+    expect(app.snapshot().lootFilter.groups.armor.minRarity).toBe(5);
+    click(must(`${EQUIP()} [data-filter-clear="armor"]`));
+    expect(app.snapshot().lootFilter.groups.armor).toBeUndefined();
+  });
+
+  it('复选框改的是 keepIfBetterThanEquipped，不是别的字段', () => {
+    const box = q(`${EQUIP()} [data-filter-field="keepIfBetterThanEquipped"]`);
+    box.checked = false;
+    box.dispatchEvent(new window.Event('change', { bubbles: true }));
+    expect(app.snapshot().lootFilter.keepIfBetterThanEquipped).toBe(false);
+    expect(app.snapshot().lootFilter.enabled).toBe(false); // 没开就是没开，勾个复选不该启动熔炼
+  });
+
+  it('试算只读：报得出后果，但背包与碎片一个子都没动', () => {
+    stock([
+      { idSuffix: 't.m1', slot: 'weapon', rarity: 0 },
+      { idSuffix: 't.m2', slot: 'head', rarity: 1 },
+      { idSuffix: 't.m3', slot: 'chest', rarity: 5 },
+    ]);
+    setSelect(q(`${EQUIP()} [data-slot="filter-preset"]`), 'epic_up');
+    const before = app.snapshot();
+    const shards = before.fateShards;
+    const ids = before.player.inventory.map((g) => g.id);
+
+    click(must(`${EQUIP()} [data-act="filter-preview"]`));
+
+    const after = app.snapshot();
+    expect(after.fateShards).toBe(shards);
+    expect(after.player.inventory.map((g) => g.id)).toEqual(ids);
+    expect(q(`${EQUIP()} [data-slot="filter-stats"]`).textContent).toContain('试算');
+    expect(q(`${EQUIP()} [data-slot="filter-stats"]`).textContent).toContain('2 件');
+  });
+
+  it('本局统计随熔炼增长（不是只给个开关就不管账）', () => {
+    app.store.update((draft) => {
+      draft.metadata.gearMelted = 3;
+      draft.metadata.shardsFromMelt = 27;
+    });
+    app.renderAll();
+    expect(q(`${EQUIP()} [data-slot="filter-stats"]`).textContent).toContain('已自动熔炼 3 件');
+    expect(q(`${EQUIP()} [data-slot="filter-stats"]`).textContent).toContain('27');
   });
 });
 

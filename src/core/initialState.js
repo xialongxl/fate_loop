@@ -14,6 +14,7 @@ import { FACTION, GAME_STATUS } from './constants.js';
 import { playerStream } from './prng.js';
 import { createEntity } from './entity.js';
 import { createEmptyEquipment } from './equipment.js';
+import { defaultLootFilter } from './lootFilter.js';
 import { emptyPermanentBonus, recalcPlayer } from './derived.js';
 
 /**
@@ -98,6 +99,14 @@ export function createInitialState(seed, options = {}) {
     /** 上一场战斗的结算摘要（经验、碎片、掉落），供战斗界面展示 */
     lastBattleReward: null,
 
+    /**
+     * 熔炼规则（P2）。它在状态里而不是在设置里，是有意的：
+     * 它会改变背包→改变属性→改变后续战斗，所以它是**这一局的决策**，
+     * 必须跟着存档走（与 `permanentBonus`/`victoryAchieved` 同例：可选字段，不升版本）。
+     * 默认 `enabled:false` ⇒ 不开就与旧版本逐字节等价（包括“包满才折碎片”那条老路）。
+     */
+    lootFilter: defaultLootFilter(),
+
     // 统计
     metadata: {
       totalDamage: 0,
@@ -109,6 +118,9 @@ export function createInitialState(seed, options = {}) {
       shardsEarned: 0,
       expEarned: 0,
       gearFound: 0,
+      /** 自动熔炼（P2）的两个计数：熔了几件、换回多少碎片。面板要说人话。 */
+      gearMelted: 0,
+      shardsFromMelt: 0,
     },
 
     /** 战斗日志，定长裁剪至 LOG_CAPACITY。 */

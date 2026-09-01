@@ -104,6 +104,9 @@ function walkTo(target) {
   }
 }
 
+// 用例本体包进函数 + try：脚手架自己抛错（createApp 起不来等）必须写成一条**结果**，
+// 不能让它变成“没拿到 JSON”然被当成环境问题放过 —— 那是漏报，比假报更坏。
+async function runCase() {
 switch (target) {
   case 'menu':
     break;
@@ -183,6 +186,18 @@ switch (target) {
     if (screen === undefined) throw new Error(`未知界面：${target}`);
     app.router.go(screen);
   }
+}
+}
+
+try {
+  await runCase();
+} catch (error) {
+  emitResult({
+    ok: false,
+    problems: [`用例脚手架抛错（下面的量测不可信）：${String(error?.message ?? error)}`],
+    metrics: {},
+  });
+  throw error;
 }
 
 // ============================================================
@@ -398,17 +413,20 @@ if (screen !== null && screen !== undefined) {
   if (screen.dataset.screen === 'battle' && metrics.cards < 2) problems.push(`战斗屏实体卡只有 ${metrics.cards} 张`);
 }
 
-const result = {
+emitResult({
   screen: target,
   viewport: `${vw}x${vh}`,
   ok: problems.length === 0,
   problems,
   metrics,
-};
+});
 
-const out = document.createElement('script');
-out.type = 'application/json';
-out.id = 'audit-json';
-out.textContent = JSON.stringify(result).replace(/</g, '\u003c');
-document.body.append(out);
-window.__audit = result;
+/** 把结果写进页面。两处调用：正常走完体检，与脚手架抛错时提前交卷。 */
+function emitResult(value) {
+  const out = document.createElement('script');
+  out.type = 'application/json';
+  out.id = 'audit-json';
+  out.textContent = JSON.stringify(value).replace(/</g, '\u003c');
+  document.body.append(out);
+  window.__audit = value;
+}

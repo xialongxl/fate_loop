@@ -25,6 +25,13 @@ import { addPermanentBonus, recalcPlayer, permanentBonusOf } from './derived.js'
 import { hasMeaningfulProgress } from './runProgress.js';
 import { createEmptyEquipment, enhanceGear, salvageValue } from './equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from './loot.js';
+import {
+  dryRunFilter,
+  filterFromPreset,
+  filterSummary,
+  gearVerdict,
+  normalizeLootFilter,
+} from './lootFilter.js';
 import { pushLog } from '../contracts/defaults/log.js';
 import { FateError } from '../utils/invariant.js';
 
@@ -258,6 +265,8 @@ export class GameFlow {
     let levelAfter = levelBefore;
     const kept = [];
     let discarded = 0;
+    /** 被熔炼规则拦下的（与下面“包满溢出”分开计：两件不同的事，原因也不同） */
+    const melted = [];
 
     this.#store.update((draft) => {
       draft.status = GAME_STATUS.EXPLORING;
@@ -278,8 +287,23 @@ export class GameFlow {
       draft.metadata.expEarned += exp;
       levelAfter = levelFromTotalExp(draft.player.exp);
 
-      // 装备入包：溢出时自动折成碎片，不阻塞流程
+      // 装备入包。两道关，顺序不能倒：
+      //   1. 熔炼规则（P2）——拾取瞬间就判，被拦下的当场折成碎片
+      //   2. 包满溢出（旧行为）——规则留下来的东西才轮得到它
+      // 先规则后容量，是为了不让“包满了以故熔它”与“按规则该熔”混成一个数字。
       for (const gear of loot) {
+        const verdict = gearVerdict(gear, {
+          filter: draft.lootFilter,
+          equipment: draft.player.equipment,
+        });
+        if (!verdict.keep) {
+          const gain = salvageValue(gear);
+          draft.fateShards += gain;
+          draft.metadata.gearMelted += 1;
+          draft.metadata.shardsFromMelt += gain;
+          melted.push({ gear, shards: gain });
+          continue;
+        }
         if (draft.player.inventory.length >= INVENTORY_CAPACITY) {
           draft.fateShards += salvageValue(gear);
           discarded += 1;
@@ -300,6 +324,15 @@ export class GameFlow {
       for (const gear of kept) {
         pushLog(draft, `抬到装备：${gear.name}`);
       }
+      if (melted.length > 0) {
+        // 合一条而不是每件一条：LOG_CAPACITY 只有 100，而一场精英能掉 2 件。
+        // 逐件列名会把战斗日志挤成流水账，而玩家要看的是“规则干了什么”。
+        const gained = melted.reduce((sum, item) => sum + item.shards, 0);
+        pushLog(
+          draft,
+          `♻️ 熔炼 ${melted.length} 件（${filterSummary(draft.lootFilter)}），回收 ${gained} 枚碎片`,
+        );
+      }
       if (discarded > 0) {
         pushLog(draft, `背包已满，${discarded} 件装备自动分解`);
       }
@@ -311,6 +344,7 @@ export class GameFlow {
         levelAfter,
         loot: kept.map((g) => ({ id: g.id, name: g.name, rarityIndex: g.rarityIndex })),
         discarded,
+        melted: melted.map((g) => ({ id: g.gear.id, name: g.gear.name, shards: g.shards })),
       };
     });
 
@@ -379,6 +413,48 @@ export class GameFlow {
       draft.shopStates.set(node.id, shopState);
     });
     return shopState;
+  }
+
+  // ============================================================
+  // 熔炼规则（P2）
+  //
+  // 三个入口都在本类（屏幕不许自己 store.update）：改规则、套预设、试算。
+  // 它们都不消费随机数 —— 掉落早就在 `${nodeId}:loot` 子流里 roll 完了，
+  // 过滤器只决定“这件进不进包”，所以开关它不改一场战斗的任何指纹。
+  // ============================================================
+
+  /** 当前规则（已规范化的副本，改不坏活状态）。 */
+  lootFilter() {
+    return normalizeLootFilter(this.#store.unsafeGetState().lootFilter);
+  }
+
+  /** 局部改规则（面板上每个控件都走这里）。 */
+  setLootFilter(patch) {
+    this.#store.update((draft) => {
+      draft.lootFilter = normalizeLootFilter({ ...draft.lootFilter, ...patch });
+    });
+    this.#autoSave();
+    return this.lootFilter();
+  }
+
+  /** 套预设（整体替换，不是叠加 —— 叠加会让“换一个预设”留下上一个的碎片）。 */
+  applyLootFilterPreset(presetId) {
+    const next = filterFromPreset(presetId);
+    if (next === null) return { ok: false, reason: 'noSuchPreset' };
+    this.#store.update((draft) => {
+      draft.lootFilter = next;
+    });
+    this.#autoSave();
+    return { ok: true, filter: next };
+  }
+
+  /** 只读试算：本局背包按当前规则会熔掉什么（不改任何状态）。 */
+  previewLootFilter() {
+    const state = this.#store.unsafeGetState();
+    return dryRunFilter(state.lootFilter, {
+      inventory: state.player.inventory,
+      equipment: state.player.equipment,
+    });
   }
 
   /**
@@ -633,6 +709,8 @@ export class GameFlow {
       draft.player.permanentBonus = permanentBonusOf({ permanentBonus: run.permanentBonus });
       draft.player.equipment = { ...createEmptyEquipment(), ...(run.equipment ?? {}) };
       draft.player.inventory = [...(run.inventory ?? [])];
+      // 熔炼规则（P2）：旧档缺这个字段时 normalize 兼平为「不自动熔炼」，语义正确
+      draft.lootFilter = normalizeLootFilter(run.lootFilter);
       draft.player.gcdSequence = [...(run.gcdSequence ?? [])];
       draft.player.ogcdSlots = (run.ogcdSlots ?? []).map((s, index) => ({
         skillId: s.skillId,

@@ -514,6 +514,10 @@ export async function createApp({
       onUnequip: safe((slot) => flow.unequip(slot)),
       onSalvage: safe((id) => flow.salvage(id)),
       onEnhance: safe((id) => flow.enhance(id)),
+      // 熔炼规则（P2）：屏幕不碰 store，一律走 GameFlow 的三个入口
+      onFilterPatch: safe((patch) => flow.setLootFilter(patch)),
+      onFilterPreset: safe((id) => flow.applyLootFilterPreset(id)),
+      onFilterPreview: () => flow.previewLootFilter(),
       onToast: notify,
     }),
 

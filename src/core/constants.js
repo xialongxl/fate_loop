@@ -220,8 +220,9 @@ export const GROWTH_BUDGET = Object.freeze({
     lowSuppressFloors: 4,
     lowSuppressStep: 0.08,
     lowSuppressCap: 0.9,
-    rampFloor: 45,
-    tierLift: 0.8,
+    /** P1 从 45 改 60、0.8 改 0.5：与九档的 weight 梯子联合解，理由见 LOOT_RARITY_CURVE 注释 */
+    rampFloor: 60,
+    tierLift: 0.5,
     progressCap: 2,
   }),
   targets: Object.freeze({
@@ -322,26 +323,68 @@ export const EQUIP_SLOT_NAMES = Object.freeze({
 });
 
 /**
- * 品质六档。mult 为主属性倍率，cls 是 CSS 品质色类名。
- * 比 Fate_echo 的九档收束：本作无抽卡，掉落源少，六档已够拉开差异。
+ * 品质九档（P1：6 → 9）。
+ *
+ * **只有 `{ id, name, mult, weight }` 是手写的**（那是设计意图本身，推导出来
+ * 只是把常数换个地方藏），`index` / `cls` / `affixMax` 一律由下标推导 ——
+ * 原来六档每档手抄 `cls` 与 `affixMax`，扩到九档就会「三处互相漏」（方案文档 待决 B）。
+ *
+ * 数字的两条约束：
+ *  - `mult` 从 1.5 档起大致等比 ≈1.55 拉到 22（破损 0.6 是拖底、不是梯子一部分）
+ *  - `weight` 在峰值「普通」之后按 **1/2.4 等比**衰减 —— 重排前是
+ *    220/400/240/100/33/7，比例 0.42/0.33/0.21 一路变陡（中段鼓包）；
+ *    现在只保留一个形状参数，调曲线 = 调公比
+ *
+ * ⚠️ `weight` 与 `GROWTH_BUDGET.loot` 是**绑在一起的**（层数抬升会乘在这条梯子上），
+ * 改任何一边都要重跑 `npm run growth:report`。
  */
-export const RARITIES = Object.freeze([
-  { id: 'worn', name: '破损', mult: 0.6, cls: 'q0', weight: 220, affixMax: 0, orbSlots: 0 },
-  { id: 'common', name: '普通', mult: 1.0, cls: 'q1', weight: 400, affixMax: 1, orbSlots: 0 },
-  { id: 'fine', name: '精良', mult: 1.5, cls: 'q2', weight: 240, affixMax: 2, orbSlots: 1 },
-  { id: 'superb', name: '卓越', mult: 2.3, cls: 'q3', weight: 100, affixMax: 3, orbSlots: 1 },
-  { id: 'epic', name: '史诗', mult: 3.6, cls: 'q4', weight: 33, affixMax: 4, orbSlots: 2 },
-  { id: 'legend', name: '传说', mult: 6.0, cls: 'q5', weight: 7, affixMax: 5, orbSlots: 3 },
+const RARITY_SPEC = Object.freeze([
+  { id: 'worn', name: '破损', mult: 0.6, weight: 220, orbSlots: 0 },
+  { id: 'common', name: '普通', mult: 1.0, weight: 400, orbSlots: 0 },
+  { id: 'fine', name: '精良', mult: 1.5, weight: 167, orbSlots: 1 },
+  { id: 'superb', name: '卓越', mult: 2.3, weight: 69, orbSlots: 1 },
+  { id: 'epic', name: '史诗', mult: 3.6, weight: 29, orbSlots: 2 },
+  { id: 'legend', name: '传说', mult: 6.0, weight: 12, orbSlots: 3 },
+  { id: 'mythic', name: '神话', mult: 9.5, weight: 5, orbSlots: 4 },
+  { id: 'relic', name: '不朽', mult: 14.5, weight: 2.1, orbSlots: 5 },
+  { id: 'finale', name: '终焉', mult: 22.0, weight: 0.9, orbSlots: 6 },
 ]);
 
 /**
- * 掉落品质曲线（P0）。它现在是 `GROWTH_BUDGET.loot` 的别名 ——
+ * `orbSlots` 暂时留着：**当前无消费者**（宝珠系统不存在），
+ * 图鉴屏会如实标注「系统未实装」。实装或删除是单独一个决定，
+ * 见交接文档 §七「P1 档 —— 只剩一条清理项」。
+ */
+export const RARITIES = Object.freeze(
+  RARITY_SPEC.map((spec, index) =>
+    Object.freeze({
+      ...spec,
+      /** 数组下标本身就是品质序号：存档里存的就是它 */
+      index,
+      /** CSS 品质色类名，与 styles.css 里的 .q0..q8 一一对应 */
+      cls: `q${index}`,
+      /** 词缀条数 = 下标 ⇒ 九档是 0..8 条（同一条词缀可重复中签后累加） */
+      affixMax: index,
+    }),
+  ),
+);
+
+/**
+ * 掉落品质曲线（P0，P1 重新调过一档）。它现在是 `GROWTH_BUDGET.loot` 的别名 ——
  * 同一个对象，不是第二份定义（两个名字各自演化过一次，那正是本包要避免的事）。
- * 语义：低两档按 `lowSuppressStep` 逐段压制（沿用旧值），高档（下标 ≥2）按
+ *
+ * 语义：低两档按 `lowSuppressStep` 逐段压制；高档（下标 ≥2）按
  * `(1 + tierLift) ** (progress * (index - 1))` 抬升，第 `rampFloor` 层吃满 progress=1，
- * 之后按同一速率涨到 `progressCap`（无尽段还有 100+ 层可爬，不能一进无尽就钉死）。
- * 修的是一个真 bug：旧实现只压制低档、高档权重是常数 ⇒ 「层数只让你更少捡到破烂，
- * 并不会让你更容易捡到传说」，40 层以后装备成长停住。
+ * 之后按同一速率涨到 `progressCap`。
+ *
+ * 修的是一个真 bug：旧实现只压制低档、高档权重是常数 ⇒「层数只让你更少捡到
+ * 破烂，并不会让你更容易捡到传说」，40 层以后装备成长停住。
+ *
+ * ⚠️ **这组数与 `RARITIES[].weight` 是联合解出来的，不是各自调好的两件事。**
+ * 九档把尾巴重排平滑后，沿用旧的 `tierLift 0.8 / rampFloor 45` 会把顶三档
+ * 抬到「90 层占 66%、终焉占 29%」—— P4 的精炼当场变白给。
+ * 所以下面每个数都与那张 weight 梯子绑在一起，改一处要重跑
+ * `npm run growth:report` 与 `tests/unit/equipment.test.js` 里的曲线守卫。
  */
 export const LOOT_RARITY_CURVE = GROWTH_BUDGET.loot;
 

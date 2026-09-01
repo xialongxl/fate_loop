@@ -14,6 +14,22 @@ import { encounterStream } from './prng.js';
 import { rollEquipment } from './equipment.js';
 
 /**
+ * 精英保底品质（下标 4 = 史诗）与商店货架保底。
+ *
+ * 九档之前这两个都是 2（精良）：那时“精良”已经是第三档。现在梯子拉到
+ * 9 档、且高档单件强了一大截，保底留在 2 意味着精英与商店的区分度
+ * 被重排后的普通掉落淹掉。两档同值是有意的：**商店卖的应当就是“精英水平的货”**，
+ * 玩家花碎片的理由与打精英的理由必须是同一个。
+ *
+ * 附带后果（看数字时记住）：前几层的商店基本买不起 ——
+ * 史诗在 1 层价 ~71 碎片而一场才掉 10 枚。商店从“开局补位”变成“后期投资”。
+ */
+export const LOOT_MIN_RARITY = Object.freeze({
+  elite: 4,
+  shop: 4,
+});
+
+/**
  * 为一场胜利的战斗生成掉落。
  *
  * @param {object} params
@@ -28,9 +44,9 @@ export function rollBattleLoot({ seed, floorNumber, nodeId, isElite }) {
 
   if (!isElite && !rng.chance(LOOT_DROP_CHANCE)) return [];
 
-  // 精英掉 2 件且品质不低于「精良」（下标 2）；普通掉 1 件无下限
+  // 精英掉 2 件且品质有下限；普通掉 1 件无下限
   const count = isElite ? 2 : 1;
-  const minRarity = isElite ? 2 : 0;
+  const minRarity = isElite ? LOOT_MIN_RARITY.elite : 0;
   const drops = [];
 
   for (let i = 0; i < count; i += 1) {
@@ -53,12 +69,12 @@ export function rollBattleLoot({ seed, floorNumber, nodeId, isElite }) {
  */
 export function rollShopGear({ seed, floorNumber, nodeId, index }) {
   const rng = encounterStream(seed, floorNumber, `${nodeId}:shopgear:${index}`);
-  // 商店货至少「精良」，否则花碎片买破损装备毫无意义
+  // 商店货有保底（见 LOOT_MIN_RARITY），否则花碎片买一件破烂毫无意义
   return rollEquipment({
     rng,
     floorNumber,
     idSuffix: `shop.${floorNumber}.${nodeId}.${index}`,
-    minRarity: 2,
+    minRarity: LOOT_MIN_RARITY.shop,
   });
 }
 

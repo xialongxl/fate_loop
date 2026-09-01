@@ -38,8 +38,12 @@ const SLOT_BASE_NAMES = Object.freeze({
   trinket: ['残响核', '编织残片', '锚定符', '第七遗物'],
 });
 
-/** 词缀前缀，按品质下标取，纯装饰。 */
-const RARITY_PREFIX = Object.freeze(['残破的', '', '磨砺的', '铭刻的', '共鸣的', '终末的']);
+/**
+ * 装备名前缀：九档统一用「品质名 + 一个空格」。
+ * （旧版是一串手写形容词 `残破的/磨砺的/终末的…`，六档手写尚可，九档就会开始
+ * 编不出口，而且“终末的”与顶档“终焉”撞名。拼名不消费随机数，
+ * 所以改它不会推动任何一条随机流。）
+ */
 
 const WEAPON_SLOTS = new Set(['weapon']);
 const ARMOR_SLOTS = new Set(['head', 'chest', 'legs', 'feet']);
@@ -146,7 +150,7 @@ export function rollEquipment({
 
   const gear = {
     id: `eq.${idSuffix}`,
-    name: `${RARITY_PREFIX[rarityIndex]}${baseName}`,
+    name: `${rarity.name} ${baseName}`,
     slot,
     rarityIndex,
     floorNumber,

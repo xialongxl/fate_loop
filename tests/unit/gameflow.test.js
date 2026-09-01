@@ -33,7 +33,7 @@ import { enhanceCost, rollEquipment, salvageValue } from '../../src/core/equipme
 import { mulberry32 } from '../../src/core/prng.js';
 import { levelFromTotalExp, totalExpForLevel } from '../../src/core/progression.js';
 import { recalcPlayer } from '../../src/core/derived.js';
-import { rollBattleLoot } from '../../src/core/loot.js';
+import { LOOT_MIN_RARITY, rollBattleLoot } from '../../src/core/loot.js';
 import { serializeRun } from '../../src/persistence/schema.js';
 
 const SEED = 20240101;
@@ -632,7 +632,7 @@ describe('商店', () => {
       expect(shelf.length).toBe(SHOP_GEAR_COUNT);
       expect(new Set(shelf.map((s) => s.gear.id)).size).toBe(shelf.length);
       expect(g.flow.getShopGear()).toEqual(shelf);
-      expect(shelf.every((s) => s.gear.rarityIndex >= 2)).toBe(true);
+      expect(shelf.every((s) => s.gear.rarityIndex >= LOOT_MIN_RARITY.shop)).toBe(true);
       expect(shelf.every((s) => s.price > 0)).toBe(true);
     });
 

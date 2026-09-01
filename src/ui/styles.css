@@ -983,13 +983,21 @@ code {
   color: #9ce8b0;
 }
 
-/* 品质色：q0 破损 → q5 传说，与 RARITIES 的 cls 一一对应 */
+/* 品质色：q0 破损 → q8 终焉，与 RARITIES[].cls 一一对应（九档，P1）。
+   下标就是类名后缀 —— 常量里 `cls: q${index}` 推导，加档不会漏加类。
+   三个新档的色都验过对比度（ui:audit 的 4.5:1 那一量）：
+   神话 #d59bff 8.2:1 · 不朽 #ffe9a8 14.4:1 · 终焉 #ff5d8f 5.9:1（@ #161b22）。
+   终焉故意用最刺目的绯而不是最亮的白：它是顶档，但“顶档一眼看出”靠的是稀有度叙事，
+   把颜色拉到发白会跟“已选中/强调”那类 UI 色撞车。 */
 .q0 { color: var(--text-dim); }
 .q1 { color: var(--text); }
 .q2 { color: #6cb6ff; }
 .q3 { color: var(--elite); }
 .q4 { color: var(--warn); }
 .q5 { color: #ff9b6a; }
+.q6 { color: #d59bff; }
+.q7 { color: #ffe9a8; }
+.q8 { color: #ff5d8f; }
 
 /* ---- 地图屏 ---- */
 .screen-map {

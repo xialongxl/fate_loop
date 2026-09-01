@@ -11,6 +11,7 @@ export const AUDIT_SCREENS = Object.freeze([
   'battle',
   'sequence',
   'equipment',
+  'filter',
   'character',
   'saves',
   'settings',

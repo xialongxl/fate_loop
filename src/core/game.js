@@ -27,6 +27,7 @@ import { hasMeaningfulProgress } from './runProgress.js';
 import { createEmptyEquipment, enhanceGear, salvageValue } from './equipment.js';
 import { gearPrice, rollBattleLoot, rollShopGear } from './loot.js';
 import {
+  clearedFilter,
   dryRunFilter,
   filterFromPreset,
   filterSummary,
@@ -499,6 +500,15 @@ export class GameFlow {
     });
     this.#autoSave();
     return { ok: true, filter: next };
+  }
+
+  /** 清空全部规则（编辑器里那个 reset：预设只能回到四个形状，清空是回到“没规则”）。 */
+  resetLootFilter() {
+    this.#store.update((draft) => {
+      draft.lootFilter = clearedFilter();
+    });
+    this.#autoSave();
+    return this.lootFilter();
   }
 
   /** 只读试算：本局背包按当前规则会熔掉什么（不改任何状态）。 */

@@ -64,6 +64,9 @@ import { derivePackIdentity } from './core/mods/sandbox/pack.js';
 import { createCodexScreen } from './ui/screens/codex.js';
 import { createHistoryScreen } from './ui/screens/history.js';
 import { AtmService } from './persistence/atm.js';
+import { FilterDefaultsService } from './persistence/lootFilterDefaults.js';
+import { normalizeLootFilter } from './core/lootFilter.js';
+import { buildLootFilterEditor, wireLootFilterEditor } from './ui/lootFilterEditor.js';
 import { ATM_DENOMS, atmRewardInfo, atmSummary, normalizeAtm } from './core/atm.js';
 
 const STATUS_LABELS = Object.freeze({
@@ -130,6 +133,7 @@ export async function createApp({
   packs,
   installPacks = null,
   atm,
+  filterDefaultStore,
 } = {}) {
   if (root === null || root === undefined) {
     throw new Error('createApp 需要挂载点（#app）');
@@ -245,6 +249,17 @@ export async function createApp({
           onPersistError: (message) => notify(message, 'danger'),
         }).init()
       : atm;
+
+  /**
+   * 熔炼规则的跳局默认值。与 ATM 同一条理由：它是“玩家这个人”的配置，
+   * 永远在 vanilla 库里，不跟着“装没装包”切命名空间。
+   */
+  const filterDefaults =
+    filterDefaultStore === undefined
+      ? await new FilterDefaultsService({
+          onPersistError: (message) => notify(message, 'danger'),
+        }).init()
+      : filterDefaultStore;
 
   const storageInfo = await saveService.init({
     // 包真生效 → 隔离库；包想生效但沙箱挂了 → 仍走隔离库（否则装包玩家会觉得档丢了）。
@@ -530,9 +545,11 @@ export async function createApp({
       onSalvage: safe((id) => flow.salvage(id)),
       onEnhance: safe((id) => flow.enhance(id)),
       // 熔炼规则（P2）：屏幕不碰 store，一律走 GameFlow 的三个入口
-      onFilterPatch: safe((patch) => flow.setLootFilter(patch)),
       onFilterPreset: safe((id) => flow.applyLootFilterPreset(id)),
       onFilterPreview: () => flow.previewLootFilter(),
+      onFilterEdit: () => openLootFilterEditor(),
+      onFilterSetDefault: () => void rememberLootFilterDefault(),
+      getFilterDefault: () => filterDefaults.value,
       onToast: notify,
     }),
 
@@ -1150,11 +1167,69 @@ export async function createApp({
     // 同步：备份只是改内存列表 + 入写队列（真正的落盘由 flush 统一做）
     saveService.backupAutoSave();
     store.replace(freshState(nextSeed));
+    /**
+     * 熔炼规则的跳局默认值：新局开局播种（没设过默认 ⇒ 保持「不自动熔炼」）。
+     * 读档路径（restoreRun）不会走这里 —— 它从存档里拿当时的规则，那是凭据。
+     */
+    if (filterDefaults.value !== null) {
+      store.update((draft) => {
+        draft.lootFilter = normalizeLootFilter(filterDefaults.value);
+      });
+    }
     latest = store.getSnapshot();
     flow.enterFloor(1);
     screens[SCREEN.MAP].resetView();
     router.clearStack();
     router.go(SCREEN.MAP);
+  }
+
+  /** 熔炼规则编辑器（独立对话框）。细则有 126 个控件，塞在装备屏右列会长到滚不到头。 */
+  function openLootFilterEditor() {
+    let cleanup = null;
+    const rerender = () => {
+      // 改完规则要把面板上的摘要与预设选中项一起刷新
+      screens[SCREEN.EQUIPMENT].render?.();
+    };
+    const box = dialog.open(buildLootFilterEditor(flow.lootFilter()), {
+      wide: true,
+      eyebrow: '拾取过滤',
+      onClose: () => cleanup?.(),
+    });
+    cleanup = wireLootFilterEditor({
+      box,
+      getFilter: () => flow.lootFilter(),
+      onPatch: (patch) => flow.setLootFilter(patch),
+      onReset: () => flow.resetLootFilter(),
+      onRerender: () => {
+        // 清空/换预设后整块重画：各段的“当前生效规则”提示必须跟着变，
+        // 留着旧文案就是“看着有其实没有”。
+        const next = dialog.open(buildLootFilterEditor(flow.lootFilter()), {
+          wide: true,
+          eyebrow: '拾取过滤',
+          onClose: () => cleanup?.(),
+        });
+        cleanup = wireLootFilterEditor({
+          box: next,
+          getFilter: () => flow.lootFilter(),
+          onPatch: (patch) => flow.setLootFilter(patch),
+          onReset: () => flow.resetLootFilter(),
+          onRerender: () => rerender(),
+        });
+        rerender();
+      },
+    });
+    rerender();
+  }
+
+  /** 「设为默认」：把本局当前这套规则存成跳局默认，下一局开局自动带上。 */
+  async function rememberLootFilterDefault() {
+    const ok = await confirm(
+      '把本局当前的熔炼规则存为默认？下一局开局会自动带上它（读档仍用存档里当时的规则）。',
+      { confirmLabel: '设为默认' },
+    );
+    if (!ok) return;
+    const result = await filterDefaults.set(flow.lootFilter());
+    if (result.ok) notify('已存为默认规则，下一局开局生效', 'info');
   }
 
   function restoreRun(run) {
@@ -1680,6 +1755,7 @@ export async function createApp({
     packReport,
     /** 跳局 ATM（投资系统）：服务与当时余额。测试要能拿到它才能验“跳局”二字。 */
     atm: atmService,
+    filterDefaults,
     get atmAccount() {
       return flow.hasAtm ? flow.atmAccount() : null;
     },

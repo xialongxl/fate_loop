@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { mulberry32 } from '../../src/core/prng.js';
 import {
   LOOT_FILTER_PRESETS,
+  clearedFilter,
   defaultLootFilter,
   dryRunFilter,
   filterFromPreset,
@@ -22,6 +23,7 @@ import {
   normalizeLootFilter,
   presetKeyOf,
   ruleForGear,
+  rulePhrase,
 } from '../../src/core/lootFilter.js';
 import { rollEquipment, salvageValue } from '../../src/core/equipment.js';
 import { RARITIES, NODE_TYPE } from '../../src/core/constants.js';
@@ -43,27 +45,30 @@ function gearAt({ rarity, slot = 'weapon', floor = 10, seed = 7, stats = null })
 }
 
 describe('规则规范化：不信任输入，但也不让规则坏了开不了机', () => {
-  it('脏值一律夹回合法区间，未知字段丢弃', () => {
+  it('脏值全部夹回合法区间，未知字段丢弃', () => {
     const cleaned = normalizeLootFilter({
       enabled: true,
       minRarity: 999,
-      requireAffix: 'haste',
-      minAffixValue: -4,
+      requiredAffixes: ['haste', 'crit', 'crit'],
+      minAffixValues: { crit: -4, attack: 12.9, nonsense: 5 },
+      minScore: -1,
+      meltAffixes: ['maxHp', 'bogus'],
       groups: { weapon: { minRarity: -1, nonsense: 1 }, bogusGroup: { minRarity: 3 } },
       slots: { ring: { minRarity: 9 }, bogusSlot: { minRarity: 8 } },
       keepIfBetterThanEquipped: 'yes',
     });
     expect(cleaned.minRarity).toBe(RARITIES.length - 1);
-    expect(cleaned.requireAffix).toBe(null);
-    expect(cleaned.minAffixValue).toBe(0);
-    // -1 夹到 0 ⇒ 一条什么都不要求的规则 ⇒ 整条被丢（不让它占一行“≥破损”）
+    expect(cleaned.requiredAffixes).toEqual(['crit']); // 去重 + 丢未知
+    expect(cleaned.minAffixValues).toEqual({ attack: 12 }); // crit:-4 归零后不进 map
+    expect(cleaned.minScore).toBe(0);
+    expect(cleaned.meltAffixes).toEqual(['maxHp']);
+    // -1 夹到 0 ⇒ 空规则 ⇒ 整条被丢（不让它占一行“≥破损”）
     expect(cleaned.groups.weapon).toBeUndefined();
     expect(cleaned.groups.bogusGroup).toBeUndefined();
-    // ring 的 9 越界 → 夹到顶档而不是丢弃（夹与丢的分别：数值越界夹，名字不认识丢）
+    // ring 的 9 越界 → 夹到顶档而不是丢（数值越界夹，名字不认识丢）
     expect(cleaned.slots.ring.minRarity).toBe(RARITIES.length - 1);
     expect(cleaned.slots.bogusSlot).toBeUndefined();
-    // keepIfBetterThanEquipped 只认 false，其它都是 true（默认开）
-    expect(cleaned.keepIfBetterThanEquipped).toBe(true);
+    expect(cleaned.keepIfBetterThanEquipped).toBe(true); // 只认 false
   });
 
   it('undefined / null / 非对象都回落到「不自动熔炼」', () => {
@@ -74,9 +79,16 @@ describe('规则规范化：不信任输入，但也不让规则坏了开不了�
     }
   });
 
-  it('没设词条要求时，数值下限跟着归零（否则是条永远不成立的隐形规则）', () => {
-    const cleaned = normalizeLootFilter({ enabled: true, requireAffix: null, minAffixValue: 50 });
-    expect(cleaned.minAffixValue).toBe(0);
+  it('旧单条字段自动迁移（老档不改也能跑，但新格式是唯一真相）', () => {
+    const cleaned = normalizeLootFilter({
+      enabled: true,
+      requireAffix: 'crit',
+      minAffixValue: 5,
+    });
+    expect(cleaned.requiredAffixes).toEqual(['crit']);
+    expect(cleaned.minAffixValues).toEqual({ crit: 5 });
+    // 没设 requireAffix 时，孤零零的 minAffixValue 不会凭空变成一条隐形规则
+    expect(normalizeLootFilter({ enabled: true, minAffixValue: 50 }).minAffixValues).toEqual({});
   });
 
   it('规范化是幂等的（读档→存档→再读档不该继续漂）', () => {
@@ -117,17 +129,75 @@ describe('判定', () => {
     expect(gearVerdict(gearAt({ rarity: 0, slot: 'weapon' }), { filter }).keep).toBe(false);
   });
 
-  it('词条门槛：达标留、不达标熔，crit 用 0.1% 为单位', () => {
+  it('词条门槛：多条同时必满足，每条独立下限，crit 用 0.1% 为单位', () => {
+    // 用 crit + defense 做双条件：造的是武器，它天然没防御 ⇒ 能真的“缺一条”。
+    // （拿 attack 当缺失项会假过 —— 武器基线本来就带 attack > 0）
     const filter = normalizeLootFilter({
       enabled: true,
-      minRarity: 0,
-      requireAffix: 'crit',
-      minAffixValue: 5,
+      requiredAffixes: ['crit', 'defense'],
+      minAffixValues: { crit: 5, defense: 20 },
       keepIfBetterThanEquipped: false,
     });
-    expect(gearVerdict(gearAt({ rarity: 2, stats: { crit: 5 } }), { filter }).keep).toBe(true);
-    expect(gearVerdict(gearAt({ rarity: 8, stats: { crit: 4 } }), { filter }).keep).toBe(false);
-    expect(gearVerdict(gearAt({ rarity: 8, stats: { crit: 0 } }), { filter }).reason).toBe('affixTooLow');
+    // 缺 defense → missingAffix（哪怕 crit 超额满）。显式写 0：八条词缀的随机roll
+    // 可能已经给了防御，不写死这条会变成"看运气过"的测试。
+    expect(gearVerdict(gearAt({ rarity: 8, stats: { crit: 9, defense: 0 } }), { filter }).reason).toBe('missingAffix');
+    // 两条都带了，但 crit 只有 3 < 5 → affixTooLow（与 missingAffix 是两种拒绝）
+    const both = gearAt({ rarity: 8, stats: { crit: 3, defense: 40 } });
+    expect(gearVerdict(both, { filter }).reason).toBe('affixTooLow');
+    // 都够 → 留
+    expect(gearVerdict(gearAt({ rarity: 8, stats: { crit: 25, defense: 40 } }), { filter }).keep).toBe(true);
+    // crit=0 算"没带这条"，不是"带得不够"
+    expect(gearVerdict(gearAt({ rarity: 8, stats: { crit: 0, defense: 40 } }), { filter }).reason)
+      .toBe('missingAffix');
+  });
+
+  it('「带这条就熔」是硬否决，排在过渡装保护之前', () => {
+    const filter = normalizeLootFilter({
+      enabled: true,
+      meltAffixes: ['maxHp'],
+      keepIfBetterThanEquipped: true,
+    });
+    // 分数高到天上也没用：玩家说了带生命的不要
+    const bigButHp = {
+      ...gearAt({ rarity: 8, slot: 'weapon' }),
+      stats: { maxHp: 500, attack: 1, defense: 0, crit: 0 },
+      score: 999_999,
+    };
+    const verdict = gearVerdict(bigButHp, {
+      filter,
+      equipment: { weapon: { ...gearAt({ rarity: 1 }), score: 1 } },
+    });
+    expect(verdict.keep).toBe(false);
+    expect(verdict.reason).toBe('meltAffix');
+  });
+
+  it('评分下限：品质过线但分数不够照样熔', () => {
+    const filter = normalizeLootFilter({
+      enabled: true,
+      minRarity: 2,
+      minScore: 5000,
+      keepIfBetterThanEquipped: false,
+    });
+    expect(gearVerdict({ ...gearAt({ rarity: 6 }), score: 100 }, { filter }).reason).toBe('belowMinScore');
+    expect(gearVerdict({ ...gearAt({ rarity: 6 }), score: 9000 }, { filter }).keep).toBe(true);
+  });
+
+  /**
+   * P2b 修的真 bug：旧模型里 `{...base, ...slot}` 会把槽里没设的 minRarity 当成 0，
+   * 于是"这个槽只想加一条词条要求"会静默把全局品质门槛清零。
+   */
+  it('逐槽只设它明说的字段，没设的往下继承而不是覆盖成零', () => {
+    const filter = normalizeLootFilter({
+      enabled: true,
+      minRarity: 4,
+      slots: { ring: { requiredAffixes: ['crit'] } },
+      keepIfBetterThanEquipped: false,
+    });
+    const rule = ruleForGear({ slot: 'ring' }, filter);
+    expect(rule.minRarity).toBe(4); // 继承全局，没被清成 -1/0
+    expect(rule.requiredAffixes).toEqual(['crit']);
+    expect(gearVerdict(gearAt({ rarity: 2, slot: 'ring' }), { filter }).reason).toBe('belowMinRarity');
+    expect(gearVerdict(gearAt({ rarity: 5, slot: 'ring' }), { filter }).reason).toBe('missingAffix');
   });
 
   it('「比身上好就必留」排在品质阈值之前', () => {
@@ -187,30 +257,51 @@ describe('预设', () => {
     withCrit.stats = { ...withCrit.stats, crit: 8 };
     expect(gearVerdict(withCrit, { filter }).keep).toBe(true);
   });
+
+  it('清空规则回到「不自动熔炼」（预设行里那个 reset）', () => {
+    const dirty = filterFromPreset('crit_jewelry');
+    dirty.minScore = 900;
+    const cleared = clearedFilter();
+    expect(cleared.enabled).toBe(false);
+    expect(cleared.slots).toEqual({});
+    expect(presetKeyOf(cleared)).toBe('off');
+    expect(cleared).not.toBe(dirty); // 不是把原对象改几个字段就算“清空”
+  });
 });
 
 describe('摘要与指纹', () => {
-  it('摘要说人话：出现品质名，不出现下标', () => {
+  it('摘要说人话：出现品质名与条件名，不出现裸下标', () => {
     const text = filterSummary(filterFromPreset('epic_up'));
     expect(text).toContain('史诗');
-    expect(/\b[0-9]\b/.test(text.replace(/0\.5%/, ''))).toBe(false);
+    const rich = rulePhrase({
+      minRarity: 4,
+      requiredAffixes: ['crit'],
+      minAffixValues: { crit: 5 },
+      minScore: 3000,
+      meltAffixes: ['maxHp'],
+    });
+    expect(rich).toContain('带生命则熔');
+    expect(rich).toContain('须带暴击');
+    expect(rich).toContain('评分≥3000');
   });
 
-  it('同一规则同哈希，改一格就变；与 groups 对象的键序无关', () => {
+  it('同一规则同哈希，改一格就变；与 slots 对象的键序无关', () => {
     const a = filterFromPreset('crit_jewelry');
     const b = filterFromPreset('crit_jewelry');
     expect(filterHashOf(a)).toBe(filterHashOf(b));
-    const shuffled = { ...a, groups: { accessory: a.groups.accessory } };
-    expect(filterHashOf(shuffled)).toBe(filterHashOf(a));
-    expect(filterHashOf({ ...a, minRarity: 3 })).not.toBe(filterHashOf(a));
+    const reordered = {
+      ...a,
+      slots: { ring: a.slots.ring, pendant: a.slots.pendant, trinket: a.slots.trinket },
+    };
+    expect(filterHashOf(reordered)).toBe(filterHashOf(a));
+    expect(filterHashOf({ ...a, minScore: 3 })).not.toBe(filterHashOf(a));
+    expect(filterHashOf({ ...a, meltAffixes: ['maxHp'] })).not.toBe(filterHashOf(a));
     expect(filterHashOf({ ...a, keepIfBetterThanEquipped: false })).not.toBe(filterHashOf(a));
     expect(filterHashOf(a)).toMatch(/^[0-9a-f]{8}$/);
   });
 
   it('关闭状态的哈希稳定 —— 所有旧档兼平的"没开熔炼"都归到同一个值', () => {
     expect(filterHashOf(undefined)).toBe(filterHashOf(defaultLootFilter()));
-    expect(filterHashOf(normalizeLootFilter({ enabled: false, minRarity: 7 })))
-      .not.toBe(filterHashOf(defaultLootFilter())); // 关着但字段不同 ⇒ 仍不同（将来重开就是不同规则）
   });
 });
 
@@ -348,7 +439,8 @@ describe('熔炼规则接进战斗结算', () => {
       lootFilter: filterFromPreset('crit_jewelry'),
     };
     const saved = serializeRun(state);
-    expect(saved.lootFilter.groups.accessory.minRarity).toBe(4);
+    expect(saved.lootFilter.slots.ring.minRarity).toBe(4);
+    expect(saved.lootFilter.requiredAffixes).toEqual([]);
     expect(saved.lootFilterHash).toBe(filterHashOf(state.lootFilter));
 
     // 旧档：没有 lootFilter 字段 ⇒ normalize 兜到关闭

@@ -135,6 +135,21 @@ switch (target) {
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     break;
   }
+  case 'filter': {
+    // 熔炼规则编辑器（P2b）：独立对话框，9 段折叠、展开后每段 14 个控件。
+    // 这类“控件多而密”的面板正是“没溢出但塔了”的高发区，必须量。
+    await buildProgress();
+    app.router.go(SCREEN.EQUIPMENT);
+    app.renderAll();
+    document
+      .querySelector('[data-screen="equipment"] [data-act="filter-edit"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    // 全局段是默认展开的；再手动展开一个槽段，让懒渲染的那批控件也进版面
+    document
+      .querySelector('.lf-toggle[data-toggle="slot:ring"]')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    break;
+  }
   case 'shop': {
     await buildProgress();
     walkTo(firstNode(NODE_TYPE.SHOP));
@@ -215,6 +230,9 @@ const PRECONDITIONS = {
   battle: () => ['battling', 'paused', 'finished'].includes(app.snapshot().status),
   shop: () => document.querySelector('.app-dialog')?.hidden === false,
   event: () => document.querySelector('.app-dialog')?.hidden === false,
+  // 体检要量的是“规则编辑器真的打开了且段渲染出来了”，不是“点了按钮没报错”
+  filter: () => document.querySelectorAll('.dialog-box .lf-block').length === 9
+    && document.querySelectorAll('.lf-body:not([hidden]) select').length >= 2,
   victory: () => document.querySelector('.dialog-box')?.textContent.includes('通关结算') === true,
   menu: () => document.querySelector('.screen-menu:not([hidden])') !== null,
 };
@@ -222,6 +240,7 @@ const expected = {
   battle: '战斗状态（进行中/暂停/已结束）',
   shop: '商店对话框已打开',
   event: '事件对话框已打开',
+  filter: '熔炼规则编辑器已打开（9 段，全局与一个槽段已展开）',
   victory: '通关结算面板已打开',
   menu: '停在主菜单',
 };

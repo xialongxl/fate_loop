@@ -2699,77 +2699,148 @@ code {
   align-items: center;
 }
 
-.loot-rules {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+/* ============================================================
+   自动熔炼规则编辑器（独立对话框，P2b）
+   旧装备屏内嵌版那套 .loot-rule-* 已随面板一起删掉 —— 留着就是"样式有人写没人用"。
+   ============================================================ */
+
+/* 每段一个头 + 一个可折叠体。头三列：段名 / 当前生效规则 / 折叠箭头。 */
+.lf-block {
+  border-top: 1px solid var(--border);
 }
 
-/* dl 里每行是 dt+dd 包在 div 里：不给 .loot-rule-row 定 flex，
-   dt/dd 会塌成“一行一个词”（ui:audit 专门量 dt/dd 同排就是为这个） */
-.loot-rule-row {
+.lf-toggle {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 2px;
+  background: transparent;
+  border: 0;
+  text-align: left;
 }
 
-.loot-rule-row.is-global .loot-rule-label {
-  color: var(--accent);
+.lf-toggle:hover {
+  background: #1c2129;
 }
 
-/* 复选那一行只一个控件：不该跟着上面的“两个下拉 + 一个数”一起折行 */
-.loot-rule-row.is-check .loot-rule-controls {
-  flex-wrap: nowrap;
-}
-
-.loot-rule-label {
-  margin: 0;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.loot-rule-controls {
-  margin: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-  min-width: 0;
-}
-
-.loot-rule-input {
-  min-width: 0;
-  /* 42px 是窄视口（420px 那一档）不溢出的上限：品质名与“不限”都是三字内 */
-  flex: 0 1 auto;
-  max-width: 84px;
-  padding: 2px 4px;
-  font-size: 11.5px;
-}
-
-input[type="number"].loot-rule-input {
-  width: 56px;
-  max-width: 56px;
-}
-
-.loot-rule-clear {
-  padding: 2px 6px;
-  font-size: 11px;
+.lf-toggle-title {
+  font-weight: 600;
+  color: var(--text);
   white-space: nowrap;
 }
 
-.loot-rule-check {
-  display: flex;
-  align-items: center;
-  gap: 5px;
+/* 收起状态也要看得见"这段现在是什么规则"，否则折叠就变成藏起来猜。 */
+.lf-toggle-rule {
   font-size: 11.5px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.lf-caret {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.lf-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 4px 2px 12px;
+}
+
+.lf-field {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.lf-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  padding-top: 6px;
+}
+
+.lf-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.lf-inline.is-nums {
+  gap: 4px 6px;
+}
+
+.lf-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lf-check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.lf-num {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.lf-num input,
+.lf-score,
+.lf-body select {
+  min-width: 0;
+  padding: 3px 5px;
+  font-size: 12px;
+}
+
+.lf-num input,
+.lf-score {
+  width: 62px;
+  text-align: center;
+}
+
+.lf-unit {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.lf-clear {
+  align-self: flex-start;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+
+.lf-enable {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.loot-rule-check input {
-  flex: 0 0 auto;
+.lf-enable input {
   margin: 0;
+  accent-color: var(--accent);
+}
+
+.lf-hint {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
 }
 
 .loot-hint {

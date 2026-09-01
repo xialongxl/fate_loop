@@ -379,31 +379,36 @@ describe('装备屏 · 自动熔炼面板', () => {
     expect(q(`${EQUIP()} [data-slot="filter-summary"]`).textContent).toContain('史诗');
   });
 
-  it('手改一格就脱离预设（下拉框不许接着说瞎话）', () => {
-    setSelect(q(`${EQUIP()} [data-slot="filter-preset"]`), 'junk');
-    const raritySelect = q(`${EQUIP()} [data-filter-field="minRarity"]`);
-    setSelect(raritySelect, '6');
-    const values = qa(`${EQUIP()} [data-slot="filter-preset"] option`).map((o) => o.value);
-    expect(values).toContain('custom');
-    expect(q(`${EQUIP()} [data-slot="filter-preset"]`).value).toBe('custom');
-    expect(app.snapshot().lootFilter.minRarity).toBe(6);
+  it('「编辑规则…」打开独立对话框（细则不在右列里堆）', () => {
+    // P2b：8 槽逐位补全后控件有 126 个，塞在右列会长到滚不到头。
+    // 右列只留摘要/预设/试算/两个入口，细则进对话框。
+    expect(q(`${EQUIP()} [data-filter-field]`)).toBe(null);
+    click(must(`${EQUIP()} [data-act="filter-edit"]`));
+    const box = q('.dialog-box');
+    expect(box).not.toBeNull();
+    expect(box.textContent).toContain('自动熔炼规则');
+    expect(box.textContent).toContain('逐槽 > 部位组 > 全局');
+    expect(qa('.dialog-box .lf-block')).toHaveLength(9); // 全局 + 8 槽
   });
 
-  it('部位组例外能加上也能退回「用全局」', () => {
-    const armorSelect = qa(`${EQUIP()} [data-filter-group="armor"]`)[0];
-    expect(armorSelect).toBeTruthy();
-    setSelect(armorSelect, '5');
-    expect(app.snapshot().lootFilter.groups.armor.minRarity).toBe(5);
-    click(must(`${EQUIP()} [data-filter-clear="armor"]`));
-    expect(app.snapshot().lootFilter.groups.armor).toBeUndefined();
-  });
+  it('「设为默认规则」写进跳局默认，新局开局自动带上', async () => {
+    setSelect(q(`${EQUIP()} [data-slot="filter-preset"]`), 'epic_up');
+    click(must(`${EQUIP()} [data-act="filter-default"]`));
+    await tick();
+    // 确认弹层里要点一下（它是会改变以后每一局的操作，不该静默写盘）
+    const confirmBox = q('.dialog-box [data-confirm]');
+    expect(confirmBox, '应该弹确认').not.toBeNull();
+    click(confirmBox);
+    await tick(6);
 
-  it('复选框改的是 keepIfBetterThanEquipped，不是别的字段', () => {
-    const box = q(`${EQUIP()} [data-filter-field="keepIfBetterThanEquipped"]`);
-    box.checked = false;
-    box.dispatchEvent(new window.Event('change', { bubbles: true }));
-    expect(app.snapshot().lootFilter.keepIfBetterThanEquipped).toBe(false);
-    expect(app.snapshot().lootFilter.enabled).toBe(false); // 没开就是没开，勾个复选不该启动熔炼
+    expect(app.filterDefaults.value).toMatchObject({ enabled: true, minRarity: 4 });
+    app.startNewRun(4321);
+    await tick(2);
+    expect(app.snapshot().lootFilter).toMatchObject({ enabled: true, minRarity: 4 });
+    // 按钮文案跟着默认值状态走（没默认时说“设为”，有了说“更新”）
+    app.router.go(SCREEN.EQUIPMENT);
+    await tick();
+    expect(q(`${EQUIP()} [data-slot="filter-default"]`).textContent).toContain('更新');
   });
 
   it('试算只读：报得出后果，但背包与碎片一个子都没动', () => {

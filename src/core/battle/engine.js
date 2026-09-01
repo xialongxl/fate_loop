@@ -164,7 +164,18 @@ export class BattleEngine {
     const state = this.#store.unsafeGetState();
     const registry = this.#registry;
     const engine = this;
+    /**
+     * 当前正在施放的技能。由 scheduler 在每次 `execute` 前设进来，然后被抹到
+     * damage / heal / applyBuff 的参数里 —— 这样**日志能说出是哪个技能**，
+     * 而技能作者（包括第三方包）不用自己传 skillId：他们本来就拿不到自己的 id。
+     */
+    let activeSkill = null;
+    const withSkill = (args) => ({ skillId: activeSkill, ...args });
     return {
+      /** 仅供调度器使用；技能与包不应该碰它 */
+      setActiveSkill(skillId) {
+        activeSkill = skillId ?? null;
+      },
       get virtualTime() {
         return state.virtualTime;
       },
@@ -187,13 +198,13 @@ export class BattleEngine {
        * 去猜。等价性由 tests/unit/fate-api.test.js 守住。
        * ---------------------------------------------------------------- */
       damage(args) {
-        return registry.call(DAMAGE_APPLY, args);
+        return registry.call(DAMAGE_APPLY, withSkill(args));
       },
       heal(args) {
-        return registry.call(HEAL_APPLY, args);
+        return registry.call(HEAL_APPLY, withSkill(args));
       },
       applyBuff(args) {
-        return registry.call(BUFF_APPLY, args);
+        return registry.call(BUFF_APPLY, withSkill(args));
       },
       /**
        * 按 id 取实体快照。

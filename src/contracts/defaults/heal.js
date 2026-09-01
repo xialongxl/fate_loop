@@ -8,7 +8,7 @@ import { resolveModifiers } from '../../core/buffs.js';
 import { ContractViolationError } from '../../utils/invariant.js';
 
 export function createHealApply({ store, findEntity, pushLog, getBuffTable }) {
-  return function healApply({ sourceId, targetId, amount }) {
+  return function healApply({ sourceId, targetId, amount, skillId = null }) {
     if (!Number.isFinite(amount) || amount < 0) {
       throw new ContractViolationError('heal.apply 的 amount 必须是非负有限数', { sourceId, targetId, amount });
     }
@@ -32,14 +32,17 @@ export function createHealApply({ store, findEntity, pushLog, getBuffTable }) {
     if (source !== null) source.stats.healDone += healed;
 
     if (healed > 0) {
-      // 自疗时不重复报名，否则日志是“X 为 X 恢复”
-      const sourceName = source?.name ?? sourceId;
-      pushLog(
-        state,
-        source === target
-          ? `${target.name} 恢复了 ${healed} 点生命`
-          : `${sourceName} 为 ${target.name} 恢复 ${healed} 点生命`,
-      );
+      // 自疗与否交给渲染层判断（它看 actorId === targetId），不在这里拼句子——
+      // 拼了句子就等于把措辞写进状态
+      pushLog(state, {
+        kind: 'heal',
+        actorId: sourceId ?? null,
+        targetId,
+        skillId,
+        amount: healed,
+        self: source === target,
+        hpLeft: target.hp,
+      });
     }
 
     return { healed, targetHp: target.hp };

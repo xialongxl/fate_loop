@@ -22,7 +22,7 @@ import { ContractViolationError } from '../../utils/invariant.js';
 const DEFAULT_CRIT_CHANCE = 0.15;
 
 export function createDamageApply({ store, getRng, findEntity, pushLog, getBuffTable }) {
-  return function damageApply({ sourceId, targetId, amount, canCrit = true, critChance }) {
+  return function damageApply({ sourceId, targetId, amount, canCrit = true, critChance, skillId = null }) {
     if (!Number.isFinite(amount)) {
       throw new ContractViolationError('damage.apply 的 amount 必须是有限数', { sourceId, targetId, amount });
     }
@@ -73,12 +73,21 @@ export function createDamageApply({ store, getRng, findEntity, pushLog, getBuffT
     if (source !== null) source.stats.damageDealt += actual;
 
     const lethal = target.hp === 0;
-    pushLog(
-      state,
-      `${source?.name ?? sourceId} 对 ${target.name} 造成 ${actual} 点伤害${isCrit ? '（暴击）' : ''}${
-        lethal ? ' — 击杀' : ''
-      }`,
-    );
+    /**
+     * 结构化日志：存 id 不存名字，渲染时再查。
+     * 名字进日志等于把文案写进状态 —— 改措辞就会改变战斗指纹。
+     * `hpLeft` 是参考图里没带但我们值得带的一列：玩家真正关心的是"还打得动吗"。
+     */
+    pushLog(state, {
+      kind: isCrit ? 'crit' : 'damage',
+      actorId: sourceId ?? null,
+      targetId,
+      skillId,
+      amount: actual,
+      crit: isCrit,
+      lethal,
+      hpLeft: target.hp,
+    });
 
     return { dealt: actual, isCrit, targetHp: target.hp, lethal };
   };

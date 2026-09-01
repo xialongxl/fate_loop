@@ -1,7 +1,7 @@
 {
   "name": "fate-loop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "命运轮回：FATE LOOP — 纯文字、纯单机、模组驱动的 Roguelike 自动战斗工具",
   "scripts": {

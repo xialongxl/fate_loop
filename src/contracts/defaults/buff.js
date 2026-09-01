@@ -9,7 +9,7 @@ import { ContractViolationError, assertNonNegativeInteger } from '../../utils/in
 import { STEP_MS } from '../../core/constants.js';
 
 export function createBuffApply({ store, findEntity, pushLog, getBuffTable }) {
-  return function buffApply({ targetId, buffId, stacks = 1, durationMs, maxStacks = 99 }) {
+  return function buffApply({ targetId, buffId, stacks = 1, durationMs, maxStacks = 99, skillId = null }) {
     if (typeof buffId !== 'string' || buffId === '') {
       throw new ContractViolationError('buff.apply 需要非空 buffId', { targetId, buffId });
     }
@@ -39,9 +39,14 @@ export function createBuffApply({ store, findEntity, pushLog, getBuffTable }) {
     // 日志面向玩家，必须用模组声明的显示名，不能括出 buffId 这种内部键。
     // 取不到定义时法定回退到 buffId，但加载期的引用校验已经堆死了这条路径。
     const definition = getBuffTable?.()?.get(buffId);
-    const label = definition?.name ?? buffId;
-    const verb = definition?.isDebuff === true ? '受到' : '获得';
-    const suffix = nextStacks > 1 ? `（${nextStacks} 层）` : '';
-    pushLog(state, `${target.name} ${verb} ${label}${suffix}`);
+    // 不再拼「X 获得/受到 Y」：进/出、我方获得还是敌方被施加，视角不同写法不同，
+    // 那是展示层的事。这里只记录事实。
+    pushLog(state, {
+      kind: definition?.isDebuff === true ? 'debuff' : 'buff',
+      targetId,
+      buffId,
+      stacks: nextStacks,
+      skillId,
+    });
   };
 }

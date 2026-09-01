@@ -813,7 +813,7 @@ dd {
   width: 100%;
   /* 参考项目是 min(88vh, 860px)：不给上限的话，大屏上对话框会长到顶天，
      中间那段变成“滚不到头的列”而不是“一个面板” */
-  max-height: min(88vh, 860px);
+  max-height: min(94vh, 1100px);
   overflow-y: auto;
   box-shadow: 0 18px 50px rgba(1, 4, 9, 0.55);
 }
@@ -2503,7 +2503,9 @@ code {
 
 /* ---- 对话框补充 ---- */
 .dialog-box.is-wide {
-  max-width: 760px;
+  /* 1040px：宽了之后 ATM 两排按钮不再挤、行内留白更多，
+     高度需求自然下降 —— 比一味加高更划算（加高只会让眼睛横着跑更远） */
+  max-width: min(1040px, 100%);
 }
 
 .dialog-box h2:focus-visible {

@@ -323,14 +323,49 @@ const lum = (css) => {
   });
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 };
+/** 拆 rgba() → {rgb:'r,g,b', a:0..1}。不带 alpha 的按 1 算。 */
+const splitAlpha = (css) => {
+  const nums = (css.match(/[\d.]+/g) ?? ['0', '0', '0', '1']).map(Number);
+  return { rgb: `${nums[0]},${nums[1]},${nums[2]}`, a: nums.length >= 4 ? nums[3] : 1 };
+};
+/**
+ * 背景色：必须**把半透明层合成下去**再算亮度。
+ *
+ * 旧写法直接拿第一个非透明背景（只排除了 rgba(0,0,0,0)），于是
+ * `rgba(115,214,220,.14)` 这种选中态薄底被当成**不透明**青色去算，
+ * 实测报出“对比度 1.5”—— 而屏幕上它是“深底 + 14% 青”，浅字对它是 8:1 以上。
+ * 假报比不报更坏：它会让人去改一个根本没问题的颜色。
+ */
 const bgOf = (el) => {
+  const stack = [];
   let node = el;
   while (node !== null && node !== document) {
     const c = getComputedStyle(node).backgroundColor;
-    if (c !== '' && c !== 'transparent' && !c.startsWith('rgba(0, 0, 0, 0')) return c;
+    if (c && c !== 'transparent') {
+      const { rgb, a } = splitAlpha(c);
+      stack.push({ rgb, a });
+      if (a >= 1) break;
+    }
     node = node.parentElement;
   }
-  return 'rgb(13, 17, 23)';
+  // 从下往上合成（先底层、后上层）
+  let base = { r: 13, g: 17, b: 23 }; // 页面底色，堆栈到底时兼作最终底色
+  const layers = stack.reverse();
+  if (layers.length > 0) {
+    const bottom = splitAlpha(`rgba(${layers[0].rgb},1)`);
+    const [br, bg, bb] = bottom.rgb.split(',').map(Number);
+    base = { r: br, g: bg, b: bb };
+    for (let i = 1; i < layers.length; i += 1) {
+      const [lr, lg, lb] = layers[i].rgb.split(',').map(Number);
+      const a = Math.max(0, Math.min(1, layers[i].a));
+      base = {
+        r: base.r * (1 - a) + lr * a,
+        g: base.g * (1 - a) + lg * a,
+        b: base.b * (1 - a) + lb * a,
+      };
+    }
+  }
+  return `rgb(${Math.round(base.r)}, ${Math.round(base.g)}, ${Math.round(base.b)})`;
 };
 const low = [];
 for (const el of visible.filter((x) => x.children.length === 0 && x.textContent.trim().length > 1 && !isSvg(x))) {

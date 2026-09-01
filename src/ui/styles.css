@@ -1,19 +1,30 @@
 :root {
-  --bg: #0d1117;
-  --bg-raised: #161b22;
-  --bg-inset: #0a0e14;
-  --border: #2d333b;
-  --text: #d8dee9;
-  --text-dim: #8b949e;
-  --accent: #58a6ff;
-  --accent-dim: #1f6feb;
-  /* 主按钮底色：--accent-dim 配浅灰文字只有 3.4:1，不过 WCAG AA。
-     #175abf 配纯白 6.5:1，悬停回落到 --accent-dim 仍有 4.6:1。 */
-  --accent-press: #175abf;
+  /* 色板整体往「偏蓝 + 更亮」移一档（参考项目实测值做参考）。
+     为什么这不是“换个颜色好看点”：底色偏灰 + 正文偏暗，再怎么调排版都是
+     “工具面板”味 —— 氛围是底色/亮度/光晕/遮罩一起决定的，不是字体族。 */
+  --bg: #0c111a;
+  --bg-raised: #151d2a;
+  --bg-inset: #080c13;
+  --border: #2b3a4f;
+  --line-strong: #3d526c;
+  --text: #eef3fa;
+  --text-dim: #94a4b8;
+  /* 主色从蓝改青。连带三个坑必须一起改，不然会静默做出过不了 AA 的搭配：
+     1) 亮青底上不能放白字 → 新增 --on-accent 深色字
+     2) “选中态但字仍是浅色”的地方不能用亮青底 → 新增 --accent-tint 半透明青
+     3) 品质色 q3/q4 之接吃 --elite/--warn，本轮不动（用户定过“color 先不变”） */
+  --accent: #73d6dc;
+  --accent-dim: #2f7f88;
+  --accent-press: #73d6dc;
+  --accent-tint: rgba(115, 214, 220, 0.14);
+  --on-accent: #062028;
   --danger: #f85149;
   --success: #3fb950;
   --warn: #d29922;
   --elite: #bc8cff;
+  /* 价格与“我现在有多少”专用金色：不开新语义，只是把金色从 --warn
+     （警示色，同时还是 q4 史诗品质色）里拆出来 —— 改一个会撞另一个 */
+  --gold: #e9bf69;
   --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --mono: "Cascadia Code", "SF Mono", Consolas, monospace;
 }
@@ -63,11 +74,18 @@
 
 body {
   margin: 0;
-  background: var(--bg);
+  /* 两团 radial 光晕：参考项目就是这么做出“场景感”的 —— 纯黑底上摆卡片
+     永远像表格。它们只靠背景层，不新增 DOM、不影响任何量测。 */
+  background:
+    radial-gradient(circle at 14% -8%, rgba(115, 214, 220, 0.08), transparent 34rem),
+    radial-gradient(circle at 92% 12%, rgba(178, 155, 232, 0.06), transparent 32rem),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font);
-  font-size: 14px;
-  line-height: 1.5;
+  /* 尺度对齐：14/1.5 → 15/1.55。字号只差 1px，但行高与字号一起动才撑得开 */
+  font-size: 15px;
+  line-height: 1.55;
 }
 
 .visually-hidden {
@@ -430,8 +448,8 @@ body {
 }
 
 .map-node.is-current .node-body {
-  fill: var(--accent-press);
-  stroke: #a5d6ff;
+  fill: var(--accent-dim);
+  stroke: #a7e8ee;
   stroke-width: 3;
   stroke-dasharray: none;
 }
@@ -469,9 +487,12 @@ button {
   background: #21262d;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 5px 11px;
-  font-size: 12px;
+  border-radius: 8px;
+  padding: 7px 12px;
+  /* 参考项目的按钮是 min-height 40px / 13px 字。我们以前是 padding 5px + 12px 字
+     ≈ 30px 高 —— 按钮矮而密是“工具面板感”的另一半来源。 */
+  min-height: 36px;
+  font-size: 13px;
   font-family: inherit;
   cursor: pointer;
 }
@@ -494,13 +515,14 @@ button:focus-visible {
 .btn-primary {
   background: var(--accent-press);
   border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
+  /* 亮青底上放白字只有 1.6:1 —— 主色从蓝改青之后，这类地方必须跟着改成深色字 */
+  color: var(--on-accent);
+  font-weight: 700;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-dim);
-  border-color: #7cc0ff;
+  background: #9ce8ed;
+  border-color: #9ce8ed;
 }
 
 input, select {
@@ -699,8 +721,9 @@ dd {
 }
 
 .speed-group button.is-active {
-  background: var(--accent-dim);
+  background: var(--accent-tint);
   border-color: var(--accent);
+  color: var(--text);
 }
 
 .battle-clock {
@@ -773,12 +796,15 @@ dd {
 .app-dialog {
   position: fixed;
   inset: 0;
-  background: rgba(1, 4, 9, 0.8);
+  /* 遮罩带模糊：参考图里“背最的游戏画面糊成一片”就是 `backdrop-filter: blur(8px)`，
+     不是截图语境。它把对话框从页面上抽出来，是“氛围”里最便宜的一条。 */
+  background: rgba(5, 8, 13, 0.78);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 50;
-  padding: 20px;
+  padding: 22px;
 }
 
 .app-dialog[hidden] {
@@ -787,18 +813,37 @@ dd {
 
 .dialog-box {
   background: var(--bg-raised);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 20px 22px;
-  max-width: 520px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  padding: 22px 24px;
+  max-width: 620px;
   width: 100%;
-  max-height: 84vh;
+  max-height: 86vh;
   overflow-y: auto;
+  /* 投影把对话框真的“抬起来”：以前只靠一圈 1px 边，与页面不分层 */
+  box-shadow: 0 26px 90px rgba(0, 0, 0, 0.48);
+}
+
+.dialog-box.is-wide {
+  max-width: 900px;
+}
+
+/* 头部独立成条：用 `> h2:first-child` 做，而不是给每个对话框改标记 ——
+   零结构变动、所有对话框一起受益，而焦点陷阱与“切屏后焦点给标题”
+   那些行为都还是落在同一个 h2 上（只是被拉成了顶满宽的一条）。 */
+.dialog-box > h2:first-child {
+  margin: -22px -24px 18px;
+  padding: 18px 24px;
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--border);
+  border-radius: 14px 14px 0 0;
+  font-size: 20px;
+  line-height: 1.35;
 }
 
 .dialog-box h2 {
-  margin: 0 0 12px;
-  font-size: 17px;
+  margin: 0 0 14px;
+  font-size: 18px;
 }
 
 .dialog-box h3 {
@@ -817,11 +862,11 @@ dd {
 /* 长对话框里“离开”不该靠滚才能按：sticky + 上方一条分隔线（参考图同样有线）。 */
 .dialog-box .dialog-actions {
   position: sticky;
-  bottom: -20px; /* 抵掉 .dialog-box 的 padding-bottom，贴住内边距下沿 */
-  margin: 16px -22px -20px;
-  padding: 10px 22px 4px;
+  bottom: -22px; /* 抵掉 .dialog-box 的 padding-bottom，贴住内边距下沿 */
+  margin: 18px -24px -22px;
+  padding: 12px 24px 6px;
   border-top: 1px solid var(--border);
-  background: linear-gradient(to top, var(--bg-raised) 70%, rgba(22, 27, 34, 0));
+  background: linear-gradient(to top, var(--bg-raised) 70%, rgba(21, 29, 42, 0));
 }
 
 .summary-seq {
@@ -838,17 +883,20 @@ dd {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
 .shop-item, .event-choice {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
+  justify-content: space-between;
+  gap: 12px;
+  /* 行内留白撑开（参考图是 12px 0）：卡片边框按约定保留，但框不能又当分隔
+     又当留白 —— 两者一起用才会密。 */
+  padding: 12px 13px;
   background: var(--bg-inset);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 9px;
 }
 
 .shop-item-info, .event-choice-info {
@@ -862,12 +910,12 @@ dd {
 }
 
 .shop-item-name, .event-choice-label {
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: 15px;
 }
 
 .shop-item-desc, .event-choice-desc {
-  font-size: 11px;
+  font-size: 12.5px;
   color: var(--text-dim);
   /* 描述能很长（装备一行四个属性），不允许多行折不断就不能溢出面板 */
   overflow-wrap: anywhere;
@@ -884,7 +932,7 @@ dd {
 
 .shop-price {
   font-family: var(--mono);
-  color: var(--warn);
+  color: var(--gold);
   margin-left: 3px;
 }
 
@@ -892,32 +940,32 @@ dd {
    不靠卡片边框 —— 以前 ATM 直接接在货架后面，读起来像“货架的第四行”。
    条目仍用卡片（可点区域要有边界，触屏与低对比屏靠它）。 */
 .shop-section + .shop-section {
-  margin-top: 14px;
-  padding-top: 14px;
+  margin-top: 20px;
+  padding-top: 20px;
   border-top: 1px solid var(--border);
 }
 
-/* 段标题居中 + 亮色：参考图里“前瞻性投资系统”“收藏品”都是居中的亮字，
+/* 段标题居中 + 亮色：参考图里那两类标题都是居中的亮字，
    天然读作“分节”；左对齐灰字只读作“上一个列表的注脚”。 */
 .shop-section-title {
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   text-align: center;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 800;
   letter-spacing: 0.06em;
   color: var(--accent);
 }
 
 .shop-section.is-atm .shop-section-title {
-  color: var(--elite);
+  color: var(--accent);
 }
 
 /* 顶部钱包行：数字用金色 mono，跟参考图一样一眼定位到“我现在有多少” */
 .shop-wallet b {
   font-family: var(--mono);
-  font-size: 14px;
-  color: var(--warn);
-  margin: 0 2px;
+  font-size: 16px;
+  color: var(--gold);
+  margin: 0 3px;
 }
 
 /* ============================================================
@@ -1045,17 +1093,17 @@ code {
    它在对话框里，所以宽度受 .dialog-box 限制（窄视口还会缩）：
    按钮必须能折行，而且不能靠 nowrap 撑破面板。 */
 .atm-line {
-  margin: 2px 0 0;
+  margin: 4px 0 0;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   /* 金色：参考图里「存款余额…」那行是金色 —— 它是这一段唯一要读的数字 */
-  color: var(--warn);
+  color: var(--gold);
   overflow-wrap: anywhere;
 }
 
 .atm-note {
-  margin: 4px 0 0;
-  font-size: 11px;
+  margin: 5px 0 0;
+  font-size: 12.5px;
   color: var(--text-dim);
 }
 
@@ -1398,7 +1446,7 @@ code {
 .speed-btn.is-active {
   background: var(--accent-press);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .battle-body {
@@ -1861,9 +1909,11 @@ code {
 }
 
 .filter-btn.is-active {
-  background: var(--accent-press);
+  /* 选中态用半透明青底 + 浅字（参考项目的 .skill-config-item.on 同构）：
+     亮青底配白字会不过 AA，而 chip 这种小面积元素不值得为了底色把字改深色 */
+  background: var(--accent-tint);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--text);
 }
 
 .skill-library {
@@ -2605,8 +2655,11 @@ code {
    dt/dd 会塌成“一行一个词”（ui:audit 专门量 dt/dd 同排就是为这个） */
 .loot-rule-row {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
-  align-items: center;
+  /* 标签列按新基准字号放宽：62px 在 15px 基准下会把“武器例外”挤到换行 */
+  grid-template-columns: 74px minmax(0, 1fr);
+  /* start 而不是 center：右侧控件折成两行时，center 会让 dt 与 dd 的顶边错开，
+     而 ui:audit 正是拿“dt 与紧跟的 dd 同排”当 dl 有没有样式的判据。 */
+  align-items: start;
   gap: 6px;
 }
 

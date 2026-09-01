@@ -66,21 +66,21 @@ export function createEquipmentScreen({
 
       <!-- 自动熔炼（P2）。放在详情下面而不是设个新屏：玩家改这条规则的时机
            就是“刚抬到一件东西、想知道它会不会被熔掉”的时候。 -->
-      <section class="panel filter-panel">
+      <section class="panel loot-panel">
         <div class="panel-title-row">
           <h3 class="panel-title">自动熔炼</h3>
           <span class="panel-count" data-slot="filter-state"></span>
         </div>
-        <p class="filter-summary" data-slot="filter-summary"></p>
-        <div class="filter-tools">
+        <p class="loot-summary" data-slot="filter-summary"></p>
+        <div class="loot-tools">
           <label class="visually-hidden" for="filter-preset">熔炼预设</label>
           <select id="filter-preset" data-slot="filter-preset"></select>
           <button type="button" class="btn-ghost" data-act="filter-preview">试算背包</button>
         </div>
-        <dl class="filter-rules" data-slot="filter-rules"></dl>
-        <p class="panel-note filter-hint">熔炼发生在抬到装备的那一瞬间，不可撤销；
+        <dl class="loot-rules" data-slot="filter-rules"></dl>
+        <p class="loot-hint panel-note">熔炼发生在抬到装备的那一瞬间，不可撤销；
           它不影响拾取到什么（掉落早就在独立子流里 roll 完了），只影响谁进背包。</p>
-        <p class="filter-stats" data-slot="filter-stats"></p>
+        <p class="loot-stats" data-slot="filter-stats"></p>
       </section>
       </div>
     </div>
@@ -312,7 +312,7 @@ export function createEquipmentScreen({
   function selectHtml(field, value, group) {
     const scope = group === null ? '' : ` data-filter-group="${group}"`;
     return `
-      <select class="filter-input" data-filter-field="${field}"${scope}>
+      <select class="loot-rule-input" data-filter-field="${field}"${scope}>
         ${
           field === 'minRarity'
             ? RARITY_OPTIONS.map(
@@ -336,22 +336,22 @@ export function createEquipmentScreen({
     const scope = group === null ? '' : ` data-filter-group="${group}"`;
     const disabled = affixId === null || affixId === undefined || affixId === '' ? ' disabled' : '';
     const step = affixId === 'crit' ? '1' : '1';
-    return `<input class="filter-input" type="number" min="0" step="${step}" value="${Number(value) || 0}"${disabled} data-filter-field="${field}"${scope}>`;
+    return `<input class="loot-rule-input" type="number" min="0" step="${step}" value="${Number(value) || 0}"${disabled} data-filter-field="${field}"${scope}>`;
   }
 
   function ruleRowHtml(label, rule, group) {
     const safe = rule ?? { minRarity: 0, requireAffix: null, minAffixValue: 0 };
     return `
-      <div class="filter-row${group === null ? ' is-global' : ''}">
-        <dt class="filter-label">${label}</dt>
-        <dd class="filter-controls">
+      <div class="loot-rule-row${group === null ? ' is-global' : ''}">
+        <dt class="loot-rule-label">${label}</dt>
+        <dd class="loot-rule-controls">
           ${selectHtml('minRarity', safe.minRarity, group)}
           ${selectHtml('requireAffix', safe.requireAffix ?? '', group)}
           ${numberHtml('minAffixValue', safe.minAffixValue, group, safe.requireAffix)}
           ${
             group === null
               ? ''
-              : `<button type="button" class="btn-ghost filter-clear" data-filter-clear="${group}">用全局</button>`
+              : `<button type="button" class="btn-ghost loot-rule-clear" data-filter-clear="${group}">用全局</button>`
           }
         </dd>
       </div>`;
@@ -376,10 +376,10 @@ export function createEquipmentScreen({
         ruleRowHtml(`${GROUP_LABELS[group]}例外`, filter.groups[group] ?? null, group),
       ),
       `
-      <div class="filter-row is-check">
-        <dt class="filter-label">过渡装保护</dt>
-        <dd class="filter-controls">
-          <label class="filter-check">
+      <div class="loot-rule-row is-check">
+        <dt class="loot-rule-label">过渡装保护</dt>
+        <dd class="loot-rule-controls">
+          <label class="loot-rule-check">
             <input type="checkbox" data-filter-field="keepIfBetterThanEquipped"${filter.keepIfBetterThanEquipped ? ' checked' : ''}>
             <span>评分高于身上那件就必留</span>
           </label>

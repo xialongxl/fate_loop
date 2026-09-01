@@ -265,8 +265,16 @@ if (shell !== null && Math.abs(shell.getBoundingClientRect().height - vh) > 2) {
   problems.push(`外壳高度 ${Math.round(shell.getBoundingClientRect().height)} ≠ 视口 ${vh}`);
 }
 
-/** 能吞下溢出的容器（这些里面的元素超出视口不算问题）。 */
-const SCROLLER = '.screen, .map-canvas, .bag-list, .log-list, .library-list, .codex-list, .history-list, .battle-enemies, .seq-column, [style]';
+/**
+ * 能吞下溢出的容器（这些里面的元素超出视口不算问题）。
+ *
+ * ⚠️ 这份名单必须跟着真实滚动容器走。`.dialog-box` 一度不在里面，
+ * 于是商店对话框变高之后，「离开」按钮被报成“超出视口且无滚动容器”——
+ * 它确实 `overflow-y:auto` 能滚到，不算排版缺陷，但工具当时说不出这句话。
+ * 反过来说：它**先于肉眼发现了商店变高了**，这条报错本身是有用的信号，
+ * 所以同时给 `.dialog-actions` 加了 sticky bottom（长对话框里动作钮不该靠滚）。
+ */
+const SCROLLER = '.screen, .map-canvas, .bag-list, .log-list, .library-list, .codex-list, .history-list, .battle-enemies, .seq-column, .dialog-box, [style]';
 
 for (const el of visible) {
   const r = el.getBoundingClientRect();

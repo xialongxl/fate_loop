@@ -814,6 +814,17 @@ dd {
   margin-top: 16px;
 }
 
+/* 商店这类长对话框：`.dialog-box` 是 overflow-y:auto 的，内容能滚，
+   但“离开”是玩家随时要按得着的那个 —— 靠滚才能关掉的对话框很坑人。
+   sticky 只在能滚的容器里有意义，所以限定在 .dialog-box 里。 */
+.dialog-box .dialog-actions {
+  position: sticky;
+  bottom: -20px; /* 抵掉 .dialog-box 的 padding-bottom，贴住内边距下沿 */
+  margin: 16px -22px -20px;
+  padding: 8px 22px 4px;
+  background: linear-gradient(to top, var(--bg-raised) 70%, rgba(22, 27, 34, 0));
+}
+
 .summary-seq {
   font-family: var(--mono);
   font-size: 11px;
@@ -844,6 +855,11 @@ dd {
 .shop-item-info, .event-choice-info {
   flex: 1 1 auto;
   min-width: 0;
+  /* 两行结构：名称一行、描述一行。以前两个 span 并列在一行里，
+     11px 的灰字贴着重字名的尾巴，读一行要重新断句。 */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .shop-item-name, .event-choice-label {
@@ -854,12 +870,39 @@ dd {
 .shop-item-desc, .event-choice-desc {
   font-size: 11px;
   color: var(--text-dim);
+  /* 描述能很长（装备一行四个属性），不允许多行折不断就不能溢出面板 */
+  overflow-wrap: anywhere;
 }
 
-.shop-cost {
+/* 价格并进按钮文案后，按钮就是那一行的右端锚点：定宽让三行的
+   按钮左边缘对齐，扫价格时眼珠不用每次重新找位置 */
+.shop-buy {
+  flex: 0 0 auto;
+  min-width: 84px;
   font-family: var(--mono);
-  color: var(--warn);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 商店对话框里的三段（商品 / 装备货架 / ATM）靠分隔线分组，
+   不靠卡片边框 —— 以前 ATM 直接接在货架后面，读起来像“货架的第四行”。
+   条目仍用卡片（可点区域要有边界，触屏与低对比屏靠它）。 */
+.shop-section + .shop-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.shop-section-title {
+  margin: 0 0 7px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.shop-section.is-atm .shop-section-title {
+  color: var(--accent);
 }
 
 /* ============================================================
@@ -1010,7 +1053,18 @@ code {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  align-items: center;
   margin-top: 6px;
+}
+
+/* 存与取各一行，行首给个小标签：光靠按钮里“存/取”那一个字，
+   四个按钮排一排时要看第二遍才分得清哪组在干什么 */
+.atm-row-label {
+  flex: 0 0 auto;
+  min-width: 30px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
 }
 
 .atm-row .btn-ghost {
@@ -2500,14 +2554,14 @@ code {
   min-height: 0;
 }
 
-.filter-panel {
+.loot-panel {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 7px;
 }
 
-.filter-summary {
+.loot-summary {
   margin: 0;
   font-family: var(--mono);
   font-size: 11.5px;
@@ -2516,45 +2570,45 @@ code {
   overflow-wrap: anywhere;
 }
 
-.filter-tools {
+.loot-tools {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
 }
 
-.filter-rules {
+.loot-rules {
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
 
-/* dl 里每行是 dt+dd 包在 div 里：不给 .filter-row 定 flex，
+/* dl 里每行是 dt+dd 包在 div 里：不给 .loot-rule-row 定 flex，
    dt/dd 会塌成“一行一个词”（ui:audit 专门量 dt/dd 同排就是为这个） */
-.filter-row {
+.loot-rule-row {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
 }
 
-.filter-row.is-global .filter-label {
+.loot-rule-row.is-global .loot-rule-label {
   color: var(--accent);
 }
 
 /* 复选那一行只一个控件：不该跟着上面的“两个下拉 + 一个数”一起折行 */
-.filter-row.is-check .filter-controls {
+.loot-rule-row.is-check .loot-rule-controls {
   flex-wrap: nowrap;
 }
 
-.filter-label {
+.loot-rule-label {
   margin: 0;
   font-size: 11px;
   color: var(--text-dim);
 }
 
-.filter-controls {
+.loot-rule-controls {
   margin: 0;
   display: flex;
   flex-wrap: wrap;
@@ -2563,7 +2617,7 @@ code {
   min-width: 0;
 }
 
-.filter-input {
+.loot-rule-input {
   min-width: 0;
   /* 42px 是窄视口（420px 那一档）不溢出的上限：品质名与“不限”都是三字内 */
   flex: 0 1 auto;
@@ -2572,18 +2626,18 @@ code {
   font-size: 11.5px;
 }
 
-input[type="number"].filter-input {
+input[type="number"].loot-rule-input {
   width: 56px;
   max-width: 56px;
 }
 
-.filter-clear {
+.loot-rule-clear {
   padding: 2px 6px;
   font-size: 11px;
   white-space: nowrap;
 }
 
-.filter-check {
+.loot-rule-check {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -2591,17 +2645,17 @@ input[type="number"].filter-input {
   cursor: pointer;
 }
 
-.filter-check input {
+.loot-rule-check input {
   flex: 0 0 auto;
   margin: 0;
 }
 
-.filter-hint {
+.loot-hint {
   font-size: 10.5px;
   color: var(--text-dim);
 }
 
-.filter-stats {
+.loot-stats {
   margin: 0;
   font-size: 11px;
   color: var(--text-dim);

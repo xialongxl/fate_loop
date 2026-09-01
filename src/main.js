@@ -811,44 +811,52 @@ export async function createApp({
         <h2 tabindex="-1">流浪货摊</h2>
         <p class="dialog-text">持有命运碎片：<strong>${formatNumber(state.fateShards)}</strong>
           · 背包 ${state.player.inventory.length} / ${INVENTORY_CAPACITY}</p>
-        <ul class="shop-list">
-          ${shopState.offers
-            .map((offer) => {
-              const bought = shopState.purchasedIds.has(offer.id);
-              const affordable = state.fateShards >= offer.cost;
-              return `
-              <li class="shop-item">
-                <span class="shop-item-info">
-                  <span class="shop-item-name">${escapeHtml(offer.name)}</span>
-                  <span class="shop-item-desc">${escapeHtml(offer.description)}</span>
-                </span>
-                <span class="shop-cost">${offer.cost}</span>
-                <button type="button" data-buy="${escapeHtml(offer.id)}"
-                        ${bought || !affordable ? 'disabled' : ''}>${bought ? '已购买' : '购买'}</button>
-              </li>`;
-            })
-            .join('')}
-        </ul>
-        <h3>装备货架</h3>
-        <ul class="shop-list is-gear">
-          ${gearShelf
-            .map(({ gear, price }) => {
-              const bought = shopState.purchasedIds.has(gear.id);
-              const affordable =
-                state.fateShards >= price && state.player.inventory.length < INVENTORY_CAPACITY;
-              return `
-              <li class="shop-item">
-                <span class="shop-item-info">
-                  <span class="shop-item-name ${rarityOf(gear).cls}">${escapeHtml(gear.name)}</span>
-                  <span class="shop-item-desc">${escapeHtml(describeGear(gear))}</span>
-                </span>
-                <span class="shop-cost">${price}</span>
-                <button type="button" data-buy-gear="${escapeHtml(gear.id)}"
-                        ${bought || !affordable ? 'disabled' : ''}>${bought ? '已购买' : '购入'}</button>
-              </li>`;
-            })
-            .join('')}
-        </ul>
+        <section class="shop-section">
+          <h3 class="shop-section-title">商品</h3>
+          <ul class="shop-list">
+            ${shopState.offers
+              .map((offer) => {
+                const bought = shopState.purchasedIds.has(offer.id);
+                const affordable = state.fateShards >= offer.cost;
+                return `
+                <li class="shop-item">
+                  <span class="shop-item-info">
+                    <span class="shop-item-name">${escapeHtml(offer.name)}</span>
+                    <span class="shop-item-desc">${escapeHtml(offer.description)}</span>
+                  </span>
+                  <!-- 价格并进按钮：一行里三个右对齐元素（名称/价格/按钮）是噪声，
+                       而“买得起吗”与“多少钱”本来就是同一个问题 -->
+                  <button type="button" class="shop-buy" data-buy="${escapeHtml(offer.id)}"
+                          ${bought || !affordable ? 'disabled' : ''}>${bought ? '已购买' : `购买 ${offer.cost}`}</button>
+                </li>`;
+              })
+              .join('')}
+          </ul>
+        </section>
+        <section class="shop-section">
+          <h3 class="shop-section-title">装备货架</h3>
+          <ul class="shop-list is-gear">
+            ${gearShelf
+              .map(({ gear, price }) => {
+                const bought = shopState.purchasedIds.has(gear.id);
+                const affordable =
+                  state.fateShards >= price && state.player.inventory.length < INVENTORY_CAPACITY;
+                const rarity = rarityOf(gear);
+                return `
+                <li class="shop-item">
+                  <span class="shop-item-info">
+                    <span class="shop-item-name ${rarity.cls}">${escapeHtml(gear.name)}</span>
+                    <!-- 描述行重说一次品质名：名字靠颜色区分，而颜色不是给所有人看的
+                         （色弱、高对比屏、手机阳光下） -->
+                    <span class="shop-item-desc">${escapeHtml(`${rarity.name} · ${describeGear(gear)}`)}</span>
+                  </span>
+                  <button type="button" class="shop-buy" data-buy-gear="${escapeHtml(gear.id)}"
+                          ${bought || !affordable ? 'disabled' : ''}>${bought ? '已购买' : `购入 ${price}`}</button>
+                </li>`;
+              })
+              .join('')}
+          </ul>
+        </section>
         ${atmPanelHtml(state)}
         <div class="dialog-actions">
           <button type="button" data-action="close" class="btn-primary">离开</button>
@@ -880,27 +888,33 @@ export async function createApp({
       ).join('');
 
       return `
-        <h3>前瞻性投资系统 · ATM</h3>
-        <p class="atm-line">${escapeHtml(atmSummary(account))}</p>
-        <p class="atm-note">
-          存进来的碎片<strong>跳轮回保留</strong>，1:1 可取回；
-          没存的那部分死亡即清零。历史累计只增不减，取钱不会把累计取回去。
-        </p>
-        ${
-          info.pending
-            ? '<p class="atm-note is-pending">投资奖励阶梯待定 —— 现在存钱只有「保住它」这一个作用。</p>'
-            : ''
-        }
-        <div class="atm-row">
-          ${depositButtons}
-          <button type="button" class="btn-ghost" data-atm-deposit="all"
-            ${state.fateShards <= 0 ? 'disabled' : ''}>存全部 ${formatNumber(state.fateShards)}</button>
-        </div>
-        <div class="atm-row">
-          ${withdrawButtons}
-          <button type="button" class="btn-ghost" data-atm-withdraw="all"
-            ${account.balance <= 0 ? 'disabled' : ''}>取全部 ${formatNumber(account.balance)}</button>
-        </div>
+        <section class="shop-section is-atm">
+          <h3 class="shop-section-title">前瞻性投资系统 · ATM</h3>
+          <p class="atm-line">${escapeHtml(atmSummary(account))}</p>
+          <p class="atm-note">
+            存进来的碎片<strong>跨轮回保留</strong>，1:1 可取回；
+            没存的那部分死亡即清零。历史累计只增不减，取钱不会把累计取回去。
+          </p>
+          ${
+            info.pending
+              ? '<p class="atm-note is-pending">投资奖励阶梯待定 —— 现在存钱只有「保住它」这一个作用。</p>'
+              : ''
+          }
+          <!-- 存与取各一行并带小标签：四个光扑扑的按钮挤一行时，
+               “存全部 579”与“取全部 0”要看第二遍才分得清 -->
+          <div class="atm-row">
+            <span class="atm-row-label">存入</span>
+            ${depositButtons}
+            <button type="button" class="btn-ghost" data-atm-deposit="all"
+              ${state.fateShards <= 0 ? 'disabled' : ''}>存全部 ${formatNumber(state.fateShards)}</button>
+          </div>
+          <div class="atm-row">
+            <span class="atm-row-label">取回</span>
+            ${withdrawButtons}
+            <button type="button" class="btn-ghost" data-atm-withdraw="all"
+              ${account.balance <= 0 ? 'disabled' : ''}>取全部 ${formatNumber(account.balance)}</button>
+          </div>
+        </section>
       `;
     }
 

@@ -455,6 +455,28 @@ describe('节点操作', () => {
     expect(q('.app-toast').hidden).toBe(true);
   });
 
+  it('商店行是两行结构，价格写在按钮里（不靠第三列）', () => {
+    const shop = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.SHOP);
+    standOn(app, shop);
+    app.openShopDialog();
+    const box = q('.dialog-box');
+
+    // 名称与描述各占一个块级子元素（不是同一行里并列的两个 span）
+    const first = box.querySelector('.shop-item .shop-item-info');
+    expect(first.querySelector('.shop-item-name')).not.toBeNull();
+    expect(first.querySelector('.shop-item-desc')).not.toBeNull();
+    // 价格进了按钮，独立的 .shop-cost 列已整个拿掉：
+    // 一行里三个右对齐元素（名称/价格/按钮）是噪声，而“多少钱”与“买得起吗”是同一个问题
+    expect(box.querySelector('.shop-cost')).toBeNull();
+    expect(box.querySelector('[data-buy]').textContent).toMatch(/购买 \d+/);
+    expect(box.querySelector('[data-buy-gear]').textContent).toMatch(/购入 \d+/);
+    // 装备行在描述里重说一次品质名：名字靠颜色分层级，而颜色不是给所有人看的
+    const gearDesc = box.querySelector('.shop-list.is-gear .shop-item-desc').textContent;
+    expect(gearDesc).toMatch(/^(破损|普通|精良|卓越|史诗|传说|神话|不朽|终焉) ·/);
+    // 三段（商品 / 装备货架 / ATM）各自成 section，靠分隔线分组
+    expect(box.querySelectorAll('.shop-section').length).toBe(3);
+  });
+
   it('事件：选择选项后节点被清理', () => {
     const node = app.snapshot().mapNodes.find((n) => n.type === NODE_TYPE.EVENT);
     standOn(app, node);

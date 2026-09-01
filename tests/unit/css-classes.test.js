@@ -77,8 +77,86 @@ describe('样式覆盖守卫', () => {
     const missing = usedClasses().filter((cls) => !defined.has(cls) && !ALLOWLIST.has(cls));
     expect(
       missing,
-      `这些类被写进了标记但 CSS 里没有规则，会以默认样式渲染：\n  ${missing.join('\n  ')}\n` +
+        `这些类被写进了标记但 CSS 里没有规则，会以默认样式渲染：\n  ${missing.join('\n  ')}\n` +
         '补一条规则；确认无需样式时加进 ALLOWLIST 并写明为什么。',
     ).toEqual([]);
   });
+
+  /**
+   * 反向守卫：**同一个类不得在两个组件里各自定义布局（display）**。
+   *
+   * 这不是臆想的觊觎，是真实回归：P2 给熔炼面板写了 `.filter-row { display:grid
+   *   + 62px 首列 }`，而序列屏与图鉴早就在用同名的 `.filter-row { display:flex
+   *   + wrap }` —— 同名同特异度、背面的赢，于是技能库的流派 chips 被塞进
+   *   一个“首列空着 62px”的两列网格里，第 7 个流派一来就折成 2×4。
+   *   **它不溢出、不零高度、不遮字 —— ui:audit 量不到“没坏但塔了”。**
+   *
+   * 口径为什么这么窄（只抓“裸类名 + display + 跨文件”）：
+   *  - 只看顶层规则：`@media` 里的覆盖是有意的
+   *  - 跳过复合/伪类选择器：`.x:empty { display:none }` 是状态覆盖，不是第二份布局
+   *  - 只报跨文件的：同一个组件里先定布局再改 display（如 .battle-stats ×4）
+   *    今天就有 13 处，它们只有一个主人，不是本 bug 的形状——把它们一起报红
+   *    只会让人把测试关掉。宁可窄而准。
+   */
+  it('同一个类不得在两个组件里各自定义 display（跨文件撞名）', () => {
+    const css = stripMediaBlocks(readFileSync(CSS_PATH, 'utf8'));
+    const definitions = new Map();
+    for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/\bdisplay\s*:/.test(body)) continue;
+      if (/[:[>+~]/.test(selector)) continue; // 状态/复合选择器不算“第 N 份布局定义”
+      for (const m of selector.matchAll(/\.(-?[A-Za-z_][\w-]*)(?![\w-])/g)) {
+        definitions.set(m[1], (definitions.get(m[1]) ?? 0) + 1);
+      }
+    }
+
+    const owners = new Map();
+    for (const file of sourceFiles(SRC)) {
+      const text = readFileSync(file, 'utf8');
+      for (const m of text.matchAll(/\bclass(?:Name)?="([^"]*)"/g)) {
+        for (const cls of m[1].split(/\s+/)) {
+          if (!cls || cls.includes(SENTINEL)) continue;
+          if (!owners.has(cls)) owners.set(cls, new Set());
+          owners.get(cls).add(file);
+        }
+      }
+    }
+
+    const collided = [...definitions]
+      .filter(([cls, times]) => times > 1 && (owners.get(cls)?.size ?? 0) > 1)
+      .map(([cls, times]) => {
+        const where = [...(owners.get(cls) ?? [])].map((f) => f.slice(SRC.length + 1)).join('、');
+        return `.${cls}：${times} 处裸定义 display，却用在 ${where}`;
+      });
+
+    expect(
+      collided,
+      `这些类被两个以上组件共用，而 CSS 里各自给了 display —— 后面的规则会静默改掉另一个的排版：\n  ${collided.join('\n  ')}\n` +
+        '给其中一方换个带前缀的类名（别去调 grid 值 —— 撞名才是病根）。',
+    ).toEqual([]);
+  });
 });
+
+/** 剥掉 @media 块（里面的 display 覆盖是有意的响应式，不算撞名）。 */
+function stripMediaBlocks(css) {
+  let depth = 0;
+  let out = '';
+  for (let i = 0; i < css.length; i += 1) {
+    if (css.startsWith('@media', i)) {
+      depth += 1;
+      i += 5;
+      continue;
+    }
+    const ch = css[i];
+    if (ch === '{') {
+      if (depth > 0) continue;
+    }
+    if (ch === '}') {
+      if (depth > 0) {
+        depth -= 1;
+        continue;
+      }
+    }
+    if (depth === 0) out += ch;
+  }
+  return out;
+}

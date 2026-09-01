@@ -11,6 +11,7 @@
  */
 
 import { LOG_CAPACITY, SPEED_MODES } from '../../core/constants.js';
+import { logRows, formatAmount, createLogResolver } from '../logFormat.js';
 import { escapeHtml, formatNumber, formatSeconds } from '../format.js';
 
 const SPEED_BUTTONS = [SPEED_MODES.PAUSED, SPEED_MODES.X1, SPEED_MODES.X4, SPEED_MODES.MAX];
@@ -234,7 +235,118 @@ export function createBattleScreen({
       .join('');
   }
 
+  /* ============================================================
+   * 动效：飘字 + 卡片震 + 受击闪
+   *
+   * 四条约束（都不是美化考虑）：
+   *  1. **纯表现，不回写任何状态** —— 与 logLimit 同一条原则：只影响展示，
+   *     不影响战斗结果。否则“同种子必得同结果”就掺进了渲染逻辑。
+   *  2. **全走 CSS animation**，不靠 JS 逐帧改 transform —— 因为 styles.css 里有
+   *     `@media (prefers-reduced-motion: reduce) { animation: none }`，
+   *     JS 动画会绕过它。对前庭功能障碍的人是硬需求。
+   *  3. **飘字有预算**（同时最多 6 个）：4x 速度下不封顶会堆几十个节点拖死合成层。
+   *  4. **只震卡片不震全屏**：全屏震看久了眩，而卡片震恰好把视线引到“谁挨了这一下”。
+   * ========================================================== */
+  const FLOATER_BUDGET = 6;
+  let floaterLayer = null;
+  const reducedMotion = () =>
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  /** MAX 模式不逐帧渲染，但结算后一次补写多条时也不该同屏放六个爆炸 */
+  function ensureFloaterLayer() {
+    if (floaterLayer !== null && floaterLayer.isConnected) return floaterLayer;
+    floaterLayer = document.createElement('div');
+    floaterLayer.className = 'fx-layer';
+    floaterLayer.setAttribute('aria-hidden', 'true');
+    element.append(floaterLayer);
+    return floaterLayer;
+  }
+
+  /**
+   * 飘字的随机偏移。**不用 Math.random**：
+   * 一是 lint 在 UI 层也禁它（这条规则不该为一个装饰效果开口子），
+   * 二是确定性偏移让截图对比与测试可复现 —— 装饰不需要真随机。
+   */
+  let fxTick = 0;
+  function jitter() {
+    fxTick = (fxTick + 1) >>> 0;
+    const h = Math.imul(fxTick ^ (fxTick >>> 15), 2246822507) >>> 0;
+    return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+  }
+
+  function pop(entityId, text, kind) {
+    if (reducedMotion()) return;
+    const card = cards.get(entityId)?.root ?? null;
+    if (card === null) return;
+    const layer = ensureFloaterLayer();
+    while (layer.children.length >= FLOATER_BUDGET) layer.firstElementChild?.remove();
+    const box = card.getBoundingClientRect();
+    const host = element.getBoundingClientRect();
+    if (box.height === 0) return;   // 屏幕没在显示（例如已回地图）时不要往左上角堆飘字
+    const node = document.createElement('span');
+    node.className = `fx-floater fx-${kind}`;
+    node.textContent = text;
+    node.style.left = `${Math.round(box.left - host.left + box.width * (0.25 + jitter() * 0.45))}px`;
+    node.style.top = `${Math.round(box.top - host.top + 18)}px`;
+    layer.append(node);
+    node.addEventListener('animationend', () => node.remove());
+  }
+
+  function shake(entityId, level) {
+    if (reducedMotion()) return;
+    const card = cards.get(entityId)?.root ?? null;
+    if (card === null) return;
+    const cls = ['fx-shake-s', 'fx-shake-m', 'fx-shake-l'][Math.min(2, Math.max(0, level - 1))];
+    card.classList.remove('fx-shake-s', 'fx-shake-m', 'fx-shake-l');
+    void card.offsetWidth; // 重启动画：不读一次宽度，连续暴击不会重新震
+    card.classList.add(cls);
+  }
+
+  function hitFlash(entityId) {
+    if (reducedMotion()) return;
+    const card = cards.get(entityId)?.root ?? null;
+    if (card === null) return;
+    card.classList.remove('fx-hit');
+    void card.offsetWidth;
+    card.classList.add('fx-hit');
+  }
+
+  /** 只对**刚写入的**事件放动效。每次重绘全量重放等于没有动效。 */
+  function animateFresh(entries) {
+    const playerId = entries.length > 0 ? 'player' : null;
+    for (const e of entries) {
+      if (e.kind === undefined || e.kind === null) continue;   // 叙事行不动
+      const target = e.targetId ?? null;
+      if (target === null) continue;
+      const actorIsPlayer = e.actorId === playerId;
+      if (e.kind === 'crit') {
+        pop(target, `◆ ${formatAmount(e.amount)}`, 'crit');
+        shake(target, 3);
+        hitFlash(target);
+      } else if (e.kind === 'damage') {
+        pop(target, `−${formatAmount(e.amount)}`, 'dmg');
+        hitFlash(target);
+        // 只有“打到我身上”和“暴击”值得震屏；我方普通命中轻震就够了
+        shake(target, actorIsPlayer ? 1 : 2);
+      } else if (e.kind === 'heal') {
+        pop(target, `+${formatAmount(e.amount)}`, 'heal');
+      } else if (e.kind === 'buff' || e.kind === 'debuff') {
+        pop(target, e.kind === 'buff' ? '✦' : '✧', 'status');
+      }
+    }
+  }
+
   let lastLogKey = -1;
+  /**
+   * 上一次渲染时的最后一条日志（按**对象身份**记）。
+   * 不能记下标：state.log 是环形缓冲，满 180 条后 splice 会让整体前移，
+   * 用长度差算“新事件”会在满仓后开始漏放或重放。
+   */
+  let lastEntryRef = null;
+
+  /** 名字在这里查，不在写入时拼（见 ui/logFormat.js 的说明） */
+  const resolveLog = createLogResolver({ getSkills, getBuffs });
 
   function renderLog(snapshot) {
     // 只裁剪展示：state.log 的容量由引擎固定，设置项不得反向影响战斗状态
@@ -242,22 +354,49 @@ export function createBattleScreen({
     const rows = snapshot.log.slice(-limit);
     // 键里带上 limit：只比长度的话，改设置后条数没变就永远不重绘
     const key = rows.length * 1000 + limit;
+    const firstPaint = lastLogKey === -1;
     if (key === lastLogKey) return;
     lastLogKey = key;
+
+    const resolve = resolveLog(snapshot);
     slots.log.replaceChildren();
     for (const entry of rows) {
-      const li = document.createElement('li');
-      li.className = 'log-entry';
-      const time = document.createElement('span');
-      time.className = 'log-time';
-      time.textContent = `${(entry.t / 1000).toFixed(2)}s`;
-      const msg = document.createElement('span');
-      msg.className = 'log-msg';
-      msg.textContent = entry.message;
-      li.append(time, msg);
-      slots.log.append(li);
+      for (const row of logRows(entry, resolve)) {
+        const li = document.createElement('li');
+        li.className = `log-entry log-${row.kind}`;
+        const time = document.createElement('span');
+        time.className = 'log-time';
+        time.textContent = `${(entry.t / 1000).toFixed(2)}s`;
+        const icon = document.createElement('span');
+        icon.className = 'log-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = row.icon;
+        li.append(time, icon);
+        for (const segment of row.segments) {
+          if (segment.text === '') continue;
+          const span = document.createElement('span');
+          span.className = `log-${segment.cls}`;
+          span.textContent = segment.text;
+          li.append(span);
+        }
+        if (entry.hpLeft !== undefined && entry.kind !== 'heal') {
+          const left = document.createElement('span');
+          left.className = 'log-hp';
+          left.textContent = `余 ${formatNumber(entry.hpLeft)}`;
+          li.append(left);
+        }
+        slots.log.append(li);
+      }
     }
     slots.log.scrollTop = slots.log.scrollHeight;
+
+    /* 动效只给新事件。开场那一帧不放（否则读档/进屏会把旧日志当新事件炸一遍）；
+     * 单帧最多处理 4 条，4x 下也不会堆积。 */
+    const tail = snapshot.log[snapshot.log.length - 1] ?? null;
+    const idx = lastEntryRef === null ? -1 : snapshot.log.lastIndexOf(lastEntryRef);
+    const fresh = firstPaint || tail === null ? [] : idx >= 0 ? snapshot.log.slice(idx + 1) : [tail];
+    lastEntryRef = tail;
+    if (fresh.length > 0) animateFresh(fresh.slice(-4));
   }
 
   /** 结算区：战斗结束后显示奖励与「返回地图」。 */
@@ -361,6 +500,8 @@ export function createBattleScreen({
       slots.playerCard.replaceChildren();
       slots.enemyCards.replaceChildren();
       lastLogKey = -1;
+      lastEntryRef = null;
+      floaterLayer?.replaceChildren();
     },
   };
 }

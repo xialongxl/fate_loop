@@ -10,6 +10,7 @@ import { MapRenderer, NODE_VISUALS } from '../map/renderer.js';
 import { attachMapInteraction } from '../map/interaction.js';
 import { createViewState, resetView } from '../map/viewState.js';
 import { escapeHtml, formatNumber } from '../format.js';
+import { logText, createLogResolver } from '../logFormat.js';
 
 export function createMapScreen({
   getSnapshot,
@@ -18,6 +19,8 @@ export function createMapScreen({
   onSeedChange,
   getLogLimit = null,
   getContentFingerprint = null,
+  getSkills = null,
+  getBuffs = null,
 }) {
   const element = document.createElement('section');
   element.className = 'screen-map';
@@ -167,6 +170,7 @@ export function createMapScreen({
   }
 
   let lastLogKey = -1;
+  const resolveLog = createLogResolver({ getSkills, getBuffs });
 
   function renderLog(snapshot) {
     // 地图界面的日志是概览，最多 12 条；玩家的 logLimit 更小时以它为准
@@ -177,6 +181,7 @@ export function createMapScreen({
     if (key === lastLogKey) return;
     lastLogKey = key;
     logList.replaceChildren();
+    const resolve = resolveLog(snapshot);
     for (const entry of rows) {
       const li = document.createElement('li');
       li.className = 'log-entry';
@@ -185,7 +190,9 @@ export function createMapScreen({
       time.textContent = `${(entry.t / 1000).toFixed(2)}s`;
       const msg = document.createElement('span');
       msg.className = 'log-msg';
-      msg.textContent = entry.message;
+      // 地图屏是概览，用纯文本版；与战斗屏共用同一个 resolver，
+      // 不会出现“这边叫得出技能名、那边只显示 id”
+      msg.textContent = logText(entry, resolve);
       li.append(time, msg);
       logList.append(li);
     }

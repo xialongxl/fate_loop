@@ -550,7 +550,7 @@ describe('节点操作', () => {
 
     // 一次性：用过之后按钮不再出现（而不是留着让玩家反复点）
     expect(q(`${screenEl(SCREEN.MAP)} [data-action="rest"]`)).toBeNull();
-    expect(app.snapshot().log.some((l) => l.message.includes('休息'))).toBe(true);
+    expect(app.snapshot().log.some((l) => (l.text ?? '').includes('休息'))).toBe(true);
   });
 
   it('下层：出口按钮推进到第 2 层并复位地图', () => {

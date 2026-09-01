@@ -129,7 +129,7 @@ describe('enterFloor', () => {
     expect(s.monsters).toEqual([]);
     expect(s.activeBattle).toBeNull();
     expect(s.winner).toBeNull();
-    expect(s.log.some((l) => l.message.includes('进入第 1 层'))).toBe(true);
+    expect(s.log.some((l) => (l.text ?? '').includes('进入第 1 层'))).toBe(true);
   });
 
   it('起点与邻居已揭示，远处节点未揭示', () => {
@@ -352,7 +352,7 @@ describe('startBattle / finishBattle', () => {
     expect(s.player.level).toBe(2);
     expect(levelFromTotalExp(s.player.exp)).toBe(2);
     expect(s.player.maxHp).toBe(maxBefore + GROWTH_PER_LEVEL.maxHp);
-    expect(s.log.some((l) => l.message.includes('等级提升'))).toBe(true);
+    expect(s.log.some((l) => (l.text ?? '').includes('等级提升'))).toBe(true);
   });
 
   it('战利品入包并记入 metadata', async () => {
@@ -409,7 +409,7 @@ describe('startBattle / finishBattle', () => {
     expect(s.lastBattleReward.discarded).toBe(1);
     expect(s.metadata.gearFound).toBe(0);
     expect(s.fateShards).toBe(shardsBefore + SHARD_REWARD_COMBAT + salvageValue(drop));
-    expect(s.log.some((l) => l.message.includes('背包已满'))).toBe(true);
+    expect(s.log.some((l) => (l.text ?? '').includes('背包已满'))).toBe(true);
   });
 
   it('战败：记录永久死亡，不回到探索态、不给奖励', async () => {
@@ -524,7 +524,7 @@ describe('商店', () => {
     expect(g.flow.purchase(offer.id)).toEqual({ ok: true });
     expect(g.st().fateShards).toBe(before - offer.cost);
     expect(g.st().shopStates.get(g.st().currentNodeId).purchasedIds.has(offer.id)).toBe(true);
-    expect(g.st().log.some((l) => l.message.includes('购买了'))).toBe(true);
+    expect(g.st().log.some((l) => (l.text ?? '').includes('购买了'))).toBe(true);
   });
 
   it('恢复类商品立即生效且不超过上限', () => {
@@ -814,7 +814,7 @@ describe('事件', () => {
     expect(s.metadata.shardsEarned).toBe(25);
     expect(g.byId(node.id).isCleared).toBe(true);
     expect(s.clearedNodeIds.has(node.id)).toBe(true);
-    expect(s.log.some((l) => l.message.includes('歧路石碑'))).toBe(true);
+    expect(s.log.some((l) => (l.text ?? '').includes('歧路石碑'))).toBe(true);
   });
 
   it('拒绝：未知事件 / 未知选项', () => {
@@ -1077,7 +1077,7 @@ describe('restoreRun', () => {
     expect(s.clearedNodeIds).toEqual(new Set(save.clearedNodeIds));
     expect(s.visitedNodeIds).toEqual(new Set(save.visitedNodeIds));
     expect(s.gcdSequence ?? s.player.gcdSequence).toEqual(save.gcdSequence);
-    expect(s.log.some((l) => l.message.includes('读取存档'))).toBe(true);
+    expect(s.log.some((l) => (l.text ?? '').includes('读取存档'))).toBe(true);
   });
 
   it('地图由种子重建，揭示与清理状态按存档重放', async () => {
@@ -1249,7 +1249,7 @@ describe('序列合法性校验（未解锁技能进不了战斗）', () => {
     const t = await boot({ seed: 5 });
     t.flow.restoreRun(save);
     expect(t.st().player.gcdSequence).toEqual(['blade.jab']);
-    expect(t.st().log.some((l) => l.message.includes('未解锁'))).toBe(true);
+    expect(t.st().log.some((l) => (l.text ?? '').includes('未解锁'))).toBe(true);
   });
 });
 
@@ -1281,7 +1281,7 @@ describe('通关与无尽', () => {
     expect(s.floorNumber).toBe(floorBefore);
     expect(s.victoryAchieved).toBe(true);
     expect(s.metadata.floorsCleared).toBe(1);
-    expect(s.log.some((l) => l.message.includes('轮回通关'))).toBe(true);
+    expect(s.log.some((l) => (l.text ?? '').includes('轮回通关'))).toBe(true);
   });
 
   it('未到终点层时 descend 只是下层，绝不出现 victory', async () => {

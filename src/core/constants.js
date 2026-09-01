@@ -29,7 +29,15 @@ export const MAX_MODE_STEP_LIMIT = Math.ceil(BATTLE_TIMEOUT_MS / STEP_MS) + 16;
 export const MAP_GENERATION_STEP_LIMIT = 10_000;
 
 /** 战斗日志环形缓冲容量（规格 8.2）。 */
-export const LOG_CAPACITY = 100;
+/**
+ * 日志环形缓冲容量。
+ *
+ * 从 100 提到 180：日志改成“一件事一行”（治疗、状态各自成行）后，
+ * 同一场战斗的行数约 +18%，100 行会把关键事件挤掉。
+ * ⚠️ 这个值**不能**被设置项反向影响 —— logLimit 只裁展示数组，
+ * 否则玩家调个设置就会改变战斗状态（破坏确定性）。
+ */
+export const LOG_CAPACITY = 180;
 
 /** 运行状态机（规格 5.1）。 */
 export const GAME_STATUS = Object.freeze({

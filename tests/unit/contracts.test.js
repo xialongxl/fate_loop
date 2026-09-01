@@ -370,8 +370,10 @@ describe('combat.log 默认实现', () => {
 
     const entries = store.unsafeGetState().log;
     expect(entries).toHaveLength(LOG_CAPACITY);
-    expect(entries.at(-1)).toEqual({ t: (total - 1) * 16, message: `事件 ${total - 1}` });
-    expect(entries[0].message).toBe('事件 20');
+    // 叙事行落成为 `{ t, text }`：字符串形式的日志不再叫 message，
+    // 因为战斗事件现在带结构化字段，两者共用同一条缓冲。
+    expect(entries.at(-1)).toEqual({ t: (total - 1) * 16, text: `事件 ${total - 1}` });
+    expect(entries[0].text).toBe('事件 20');
   });
 });
 

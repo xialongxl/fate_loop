@@ -79,6 +79,8 @@ export function stepEntity(entity, { skills, virtualTime, context, allies, enemi
   if (picked !== null) {
     const { skill } = picked;
     const targets = resolveTargets(skill, entity, { allies, enemies, rng });
+    // 告知上下文“现在是哪个技能在结算”，日志才能说出技能名（见 engine#buildContext）
+    context.setActiveSkill?.(skill.id);
     skill.execute(context, entity, targets);
     entity.ogcdReadyAtMs.set(skill.id, virtualTime + skill.cooldownMs);
     entity.stats.skillsCast += 1;
@@ -104,6 +106,7 @@ export function stepEntity(entity, { skills, virtualTime, context, allies, enemi
   }
 
   const targets = resolveTargets(skill, entity, { allies, enemies, rng });
+  context.setActiveSkill?.(skill.id);
   skill.execute(context, entity, targets);
   entity.gcdReadyAtMs = virtualTime + skill.gcdCostMs;
   entity.stats.skillsCast += 1;

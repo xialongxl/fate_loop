@@ -171,6 +171,25 @@ export class BattleEngine {
      */
     let activeSkill = null;
     const withSkill = (args) => ({ skillId: activeSkill, ...args });
+    /**
+     * 哪些契约参数需要被注 skillId。
+     *
+     * ⚠️ 不能只包 `ctx.damage()` 这几个别名 —— 官方内容走的是
+     * `context.get(SYM.damageApply)` 拿函数直接调（别名是后来为第三方加的
+     * 高层入口）。第一版只包了别名，结果 90 个官方技能的日志 skillId 全是 null，
+     * 而单测里用 ctx.damage 的包技能却正常 —— 只看一边会以为接线是通的。
+     * 所以在 get/call 两个入口都包，两条路同构。
+     */
+    const SKILL_AWARE = new Map([
+      [DAMAGE_APPLY, true],
+      [HEAL_APPLY, true],
+      [BUFF_APPLY, true],
+    ]);
+    const wrapSymbol = (symbol) => {
+      const fn = registry.get(symbol);
+      if (SKILL_AWARE.get(symbol) !== true || typeof fn !== 'function') return fn;
+      return (args) => fn(withSkill(args));
+    };
     return {
       /** 仅供调度器使用；技能与包不应该碰它 */
       setActiveSkill(skillId) {
@@ -183,9 +202,13 @@ export class BattleEngine {
         return state.floorNumber;
       },
       get(symbol) {
-        return registry.get(symbol);
+        return wrapSymbol(symbol);
       },
       call(symbol, ...args) {
+        // 同样注入：有些写法是 context.call(SYM.damageApply, args)，绕过别名与 get
+        if (SKILL_AWARE.get(symbol) === true) {
+          return registry.call(symbol, withSkill(args[0]), ...args.slice(1));
+        }
         return registry.call(symbol, ...args);
       },
       rng() {

@@ -188,7 +188,7 @@ describe('第三方包能写多新的机制', () => {
   it('机制 1「血契」：自伤换爆发 —— 玩家自己掉血，同时打出 3 倍伤害', async () => {
     const pool = await freshPool();
     const { snapshot } = fight(pool, { seed: 11, gcdSequence: ['mech.bloodPact'] });
-    const logs = snapshot.log.map((l) => l.message);
+    const logs = snapshot.log.map((l) => l.text ?? '');
     expect(logs.some((m) => m.includes('血契：以血换伤'))).toBe(true);
     // 打自己这条必须真的落到玩家身上（不是"日志写了、状态没动"）
     expect(snapshot.player.stats.damageTaken).toBeGreaterThan(0);
@@ -202,7 +202,7 @@ describe('第三方包能写多新的机制', () => {
       gcdSequence: ['mech.chargeUp', 'mech.chargeUp', 'mech.chargeUp', 'mech.chargeUp', 'mech.chargeUp'],
       ogcdSlots: [{ skillId: 'mech.detonate', priority: 80 }],
     });
-    const logs = snapshot.log.map((l) => l.message);
+    const logs = snapshot.log.map((l) => l.text ?? '');
     const detonated = logs.filter((m) => m.includes('层蓄能'));
     expect(detonated.length, '至少引爆一次').toBeGreaterThan(0);
     expect(detonated[0]).toMatch(/([5-9]|\d{2,}) 层蓄能/);
@@ -220,7 +220,7 @@ describe('第三方包能写多新的机制', () => {
       seed: 33,
       gcdSequence: ['mech.echo', 'mech.mend', 'mech.echo'],
     });
-    const logs = snapshot.log.map((l) => l.message);
+    const logs = snapshot.log.map((l) => l.text ?? '');
     const punished = logs.filter((m) => m.includes('回响惩罚'));
     expect(punished.length, '回响应当抓到"目标回过血"').toBeGreaterThan(0);
     expect(punished[0]).toMatch(/回响惩罚了 (\d+) 点治疗/);
@@ -271,12 +271,13 @@ describe('包内可变状态 × 确定性', () => {
     // 同一池、同一包、同一种子、同一序列，**只因为先打过一场**，结果就该不同
     const second = battleFingerprint(fight(pool, { seed: 88, gcdSequence: seq }).snapshot);
 
-    expect(firstOnly.logMessages.length).toBeGreaterThan(0);
+    expect(firstOnly.logDigest.length).toBeGreaterThan(0);
     expect(second.winner).toBeTruthy();
     // 这就是跨战斗记忆的**直接证据**：同一种子重放不再等于第一次
     expect(second).not.toEqual(firstOnly);
     // 而且差异确实来自回响的记忆（惩罚日志只在第二场出现/条数不同）
-    const punish = (fp) => fp.logMessages.filter((m) => m.includes('回响惩罚')).length;
+    // 叙事行（包的 ctx.log）在指纹摘要里保留原文，所以还能按文字找
+    const punish = (fp) => fp.logDigest.filter((m) => m.includes('回响惩罚')).length;
     expect(punish(second)).not.toBe(punish(firstOnly));
   });
 });

@@ -524,6 +524,9 @@ export async function createApp({
       onNodeAction: safe((action) => void handleNodeAction(action)),
       onSeedChange: safe((text) => void handleSeedChange(text)),
       getContentFingerprint: () => fingerprint,
+      // 地图屏的日志概览也要能报出技能名：与战斗屏共用同一个 resolver 工厂
+      getSkills: () => pool.skills,
+      getBuffs: () => pool.buffs,
     }),
 
     [SCREEN.BATTLE]: createBattleScreen({

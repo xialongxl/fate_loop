@@ -354,7 +354,7 @@ async function battleOnElite(seed, filter) {
     inventory: state.player.inventory.length,
     shards: state.fateShards,
     melted: state.metadata.gearMelted,
-    log: state.log.map((entry) => entry.message),
+    log: state.log.map((entry) => entry.text ?? ''),
     lastBattleReward: state.lastBattleReward,
   };
 }

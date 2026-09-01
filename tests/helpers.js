@@ -10,6 +10,7 @@ import { registerDefaultContracts } from '../src/contracts/index.js';
 import { BattleEngine } from '../src/core/battle/engine.js';
 import { GameFlow } from '../src/core/game.js';
 import { loadMods } from '../src/core/mods/loader.js';
+import { logEntryDigest } from '../src/ui/logFormat.js';
 
 import skillsManifest from '../src/mods/official/core-skills/manifest.js';
 import * as skillsSetup from '../src/mods/official/core-skills/setup.js';
@@ -119,6 +120,9 @@ export function battleFingerprint(snapshot) {
     totalDamage: snapshot.metadata.totalDamage,
     totalHeal: snapshot.metadata.totalHeal,
     emptyLoops: snapshot.metadata.emptyLoops,
-    logMessages: snapshot.log.map((l) => `${l.t}|${l.message}`),
+    // 日志指纹只看结构化字段，不看措辞（见 ui/logFormat.js 的 logEntryDigest）。
+    // 以前这里是 `${l.t}|${l.message}`，等于把 UI 文案锁进了确定性契约：
+    // 改一个标点都会让跨速度/跨种子的对拍变红。
+    logDigest: snapshot.log.map(logEntryDigest),
   };
 }

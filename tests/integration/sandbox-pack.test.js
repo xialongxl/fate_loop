@@ -97,7 +97,7 @@ describe('沙箱包 → 真实战斗', () => {
 
     const withPack = await battleWith(pool, ['poc.nova.burst']);
     expect(withPack.winner).toBe('player');
-    expect(withPack.log.some((l) => l.message.includes('星爆横扫全场'))).toBe(true);
+    expect(withPack.log.some((l) => (l.text ?? '').includes('星爆横扫全场'))).toBe(true);
     expect(withPack.player.stats.skillsCast).toBeGreaterThan(0);
     expect(withPack.metadata.totalDamage).toBeGreaterThan(0);
     // 怪物全灭才算数：沙箱 execute 的副作用确实作用到了真实实体

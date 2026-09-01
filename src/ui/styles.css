@@ -3174,3 +3174,152 @@ code {
   font-size: 11px;
   color: var(--text-dim);
 }
+
+/* ── 战斗日志：结构化渲染（参考图语法）────────────────────────
+   一行一件事：★ 咏唱【技能】 → 目标 造成 N 伤害（暴击！）
+   名字是查出来的不是拼进去的，所以这里只负责"怎么显示"。 */
+.log-icon {
+  flex: 0 0 12px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.log-cast,
+.log-verb,
+.log-unit-word {
+  color: var(--text-dim);
+}
+
+.log-skill {
+  color: var(--accent);
+}
+
+.log-unit {
+  color: var(--text);
+}
+
+.log-amount {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: #f6c177;
+}
+
+.log-sfx {
+  color: var(--elite);
+}
+
+.log-narr {
+  color: var(--text-muted);
+}
+
+.log-hp {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* 每类事件一个颜色语义。不给颜色也行，但"一眼看出这是打我还是我打"
+   是纯文字游戏里最便宜的信息增量 */
+.log-damage .log-amount { color: #f0b8bd; }
+.log-crit .log-amount {
+  color: #fff;
+  background: var(--danger);
+  padding: 0 5px;
+  border-radius: 3px;
+}
+.log-crit {
+  border-left: 2px solid var(--danger);
+  padding-left: 6px;
+  margin-left: -8px;
+  background: rgba(248, 81, 73, 0.06);
+}
+.log-heal .log-amount { color: var(--success); }
+.log-debuff .log-sfx { color: var(--elite); }
+.log-buff .log-sfx { color: #9ce8b0; }
+.log-text .log-icon { color: var(--text-dim); }
+
+/* ── 战斗动效：飘字 + 卡片震 + 受击闪 ──────────────────────────
+   全部走 CSS animation：styles.css 末尾有
+   `@media (prefers-reduced-motion: reduce) { animation: none }`，
+   JS 逐帧改 transform 会绕过它 —— 那不是美化项，是无障碍硬需求。 */
+.screen-battle {
+  position: relative;
+}
+
+.fx-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 4;
+}
+
+.fx-floater {
+  position: absolute;
+  font-family: var(--mono);
+  font-weight: 700;
+  white-space: nowrap;
+  animation: fx-rise 0.9s ease-out forwards;
+}
+
+.fx-dmg { color: #f0b8bd; font-size: 14px; }
+.fx-heal { color: var(--success); font-size: 14px; }
+.fx-status { color: var(--elite); font-size: 13px; }
+
+.fx-crit {
+  color: #fff;
+  background: var(--danger);
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 22px;
+}
+
+@keyframes fx-rise {
+  0% { opacity: 0; transform: translateY(6px) scale(0.7); }
+  18% { opacity: 1; transform: translateY(-4px) scale(1.12); }
+  32% { transform: translateY(-10px) scale(1); }
+  100% { opacity: 0; transform: translateY(-46px) scale(1); }
+}
+
+/* 震的是卡片不是整块面板：全屏震看久了眩，而卡片震把视线引到"谁挨了这一下" */
+.entity-card.fx-shake-s { animation: fx-shake 0.16s linear; }
+.entity-card.fx-shake-m { animation: fx-shake 0.24s cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+.entity-card.fx-shake-l { animation: fx-shake-l 0.34s cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+
+@keyframes fx-shake {
+  10%, 90% { transform: translate(-1px, 0); }
+  20%, 80% { transform: translate(2px, 0); }
+  30%, 50%, 70% { transform: translate(-3px, 0); }
+  40%, 60% { transform: translate(3px, 0); }
+}
+
+@keyframes fx-shake-l {
+  10%, 90% { transform: translate(-2px, 1px); }
+  20%, 80% { transform: translate(5px, -1px); }
+  30%, 50%, 70% { transform: translate(-8px, 2px); }
+  40%, 60% { transform: translate(8px, -2px); }
+  100% { transform: translate(0, 0); }
+}
+
+.entity-card.fx-hit {
+  animation: fx-hitflash 0.22s ease-out;
+}
+
+/* 闪的是**边框与光晕**，不是卡片底色。
+ * 第一版写成 background: rgba(248,81,73,.26)，ui:audit 当场报 19 处对比度 <4.5:1 ——
+ * 半透明红压在文字底下会把 #d8dee9 拉到 4.0。量测恰好抓在动画中间，
+ * 说明玩家也会看到这一段低对比度。装饰不许吃可读性。 */
+@keyframes fx-hitflash {
+  0% {
+    border-color: var(--danger);
+    box-shadow: 0 0 0 2px rgba(248, 81, 73, 0.45), 0 0 14px rgba(248, 81, 73, 0.3);
+  }
+  100% {
+    border-color: var(--border);
+    box-shadow: none;
+  }
+}

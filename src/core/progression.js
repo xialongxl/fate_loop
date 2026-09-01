@@ -11,9 +11,7 @@
 import {
   EXP_CURVE,
   EXP_REWARD,
-  GROWTH_PER_LEVEL,
   MAX_LEVEL,
-  PLAYER_BASE,
   SKILL_FAMILIES,
   SKILL_TYPE,
   SKILL_UNLOCK_MAX_LEVEL,
@@ -21,6 +19,7 @@ import {
   STARTER_OGCD_COUNT,
   UNGROUPED_FAMILY,
 } from './constants.js';
+import { playerBaseStatsAtLevel } from './growth.js';
 
 /**
  * 升到「下一级」所需经验（即从 level 升到 level+1）。
@@ -73,17 +72,18 @@ export function levelFromTotalExp(totalExp) {
 
 /**
  * 等级对应的基础属性（不含装备与 Buff）。
+ *
+ * 数字不在本文件里：每级成长是 `GROWTH_BUDGET.player.perLevel` 的事，
+ * 由 `growth.js` 按段算（P3）。以前这里是 `n * GROWTH_PER_LEVEL.x` 一行硬算，
+ * 看上去人畜无害，代价是“想改曲线”得先找到五处里的这一处。
+ * 默认表下逐字段与旧闭式**完全相等**（`tests/unit/growth.test.js` 守）。
+ *
+ * @param {number} level
  * @returns {{maxHp:number, attack:number, defense:number, critChance:number}}
  */
 export function baseStatsAtLevel(level) {
   const lv = Math.min(MAX_LEVEL, Math.max(1, Math.floor(level) || 1));
-  const n = lv - 1;
-  return {
-    maxHp: PLAYER_BASE.maxHp + n * GROWTH_PER_LEVEL.maxHp,
-    attack: PLAYER_BASE.attack + n * GROWTH_PER_LEVEL.attack,
-    defense: PLAYER_BASE.defense + n * GROWTH_PER_LEVEL.defense,
-    critChance: PLAYER_BASE.critChance + (n * GROWTH_PER_LEVEL.crit) / 100,
-  };
+  return playerBaseStatsAtLevel(lv);
 }
 
 /** 当前等级内的经验进度，用于 UI 进度条。 */

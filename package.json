@@ -15,7 +15,8 @@
     "ui:audit": "node tools/ui-audit/run.mjs",
     "mod:poc": "node tools/mod-sandbox-poc.mjs",
     "deploy:check": "node tools/deploy-check.mjs",
-    "unlock:report": "vite-node tools/unlock-table-report.mjs"
+    "unlock:report": "vite-node tools/unlock-table-report.mjs",
+    "growth:report": "vite-node tools/growth-budget-report.mjs"
   },
   "dependencies": {
     "fflate": "^0.8.3",

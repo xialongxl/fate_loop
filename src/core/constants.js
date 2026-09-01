@@ -169,20 +169,85 @@ export const EXP_CURVE = Object.freeze({
   LATE_RATE: 1.08,
 });
 
-/** 每级成长。crit 单位为百分点。 */
-export const GROWTH_PER_LEVEL = Object.freeze({
-  maxHp: 28,
-  attack: 6,
-  defense: 4,
-  crit: 0.25,
-});
-
 /** 玩家 1 级基线（种子浮动在 initialState 中叠加）。 */
 export const PLAYER_BASE = Object.freeze({
   maxHp: 320,
   attack: 34,
   defense: 8,
   critChance: 0.05,
+});
+
+/**
+ * 成长预算总账（P3）。曲线上所有旋钮收在这一个地方，读表只走 `core/growth.js`。
+ *
+ * 为什么要有这个对象：数字本来散在五处（`GROWTH_PER_LEVEL`、`encounter.js` 里
+ * 硬编码的 0.12/0.08、`equipment.js` 的掉落权重、`RARITIES.mult`、`EXP_CURVE`），
+ * 合起来到底是什么形状没人能回答 —— 「数值不膨胀」不是谁调过的结果，
+ * 是因为没人总账。P0 那个 bug（高档权重是常数）能活这么久的原因也是这个。
+ *
+ * 默认值**逐项等于现状**（+28/+6/+4/+0.25 每级、1+0.12(f-1)、1+0.08(f-1)）：
+ * 本轮只把旋钮收口，不顺手改曲线 —— 改曲线等于重跑平衡，那得单独一轮拍板。
+ * 守卫在 `tests/unit/growth.test.js`：逐层逐项复算必须与旧闭式相等。
+ *
+ * 表的语义（三张都是「分段」，段只管到下一段起点之前）：
+ *  - `player.perLevel`：自 `fromLevel` 起每升一级的增量（改的是「玩家应多强」）
+ *  - `monster.*`：自 `fromFloor` 起的楼层缩放。`linear` = `base + rate×步数`，
+ *    `compound` = `base × (1+rate)^步数`。**段界连续**：新段以旧段外推到本段起点的
+ *    值为起点，所以 50→51 不会出现跳变（这是无尽段能接上的前提）
+ *  - `loot`：掉落品质权重曲线（P0 那张，见下方 LOOT_RARITY_CURVE 的注释）
+ *
+ * `targets` **不进任何运行时路径**，它是设计判据与报告脚本的对照组：
+ * 判据是「安全边际 = 玩家扛得住的秒数 ÷ 打完全部怪要的秒数」，不是各自 TTK 区间
+ * （两条独立区间会放过「要 26 刀才打死一个怪 vs 只能抗 8 刀」这种必输组合）。
+ * 跑 `npm run growth:report` 全程扇描，不要只看控制点 —— 实测三点全命中时
+ * 第 11 层能掉到 ×1.11、第 40 层能鼓到 ×2.92。
+ */
+export const GROWTH_BUDGET = Object.freeze({
+  player: Object.freeze({
+    base: PLAYER_BASE,
+    perLevel: Object.freeze([
+      Object.freeze({ fromLevel: 1, maxHp: 28, attack: 6, defense: 4, crit: 0.25 }),
+    ]),
+  }),
+  monster: Object.freeze({
+    hp: Object.freeze([Object.freeze({ fromFloor: 1, mode: 'linear', rate: 0.12 })]),
+    attack: Object.freeze([Object.freeze({ fromFloor: 1, mode: 'linear', rate: 0.08 })]),
+    // 防御不随层缩放（模板值直接入战）：rate 0 的占位段，不是漏写 ——
+    // 防御进的是 100/(100+def) 递减项，拿楼层去乘它会跟 K=100 这个常数打架。
+    defense: Object.freeze([Object.freeze({ fromFloor: 1, mode: 'linear', rate: 0 })]),
+  }),
+  loot: Object.freeze({
+    lowSuppressFloors: 4,
+    lowSuppressStep: 0.08,
+    lowSuppressCap: 0.9,
+    rampFloor: 45,
+    tierLift: 0.8,
+    progressCap: 2,
+  }),
+  targets: Object.freeze({
+    /** 安全边际控制点（floor → 目标倍率），由 demo/scale-curve.html 反解得到 */
+    margin: Object.freeze([
+      Object.freeze({ floor: 1, value: 2.7 }),
+      Object.freeze({ floor: 50, value: 2.0 }),
+      Object.freeze({ floor: 300, value: 2.5 }),
+    ]),
+    band: Object.freeze({ min: 1.4, max: 4.0, fatalBelow: 1.0 }),
+    /** 单场战斗时长上限（秒）：超过它玩家会直接跳结果，日志也刷不完 */
+    fightSecondsMax: 90,
+  }),
+});
+
+/**
+ * 首段每级成长的快照（crit 单位为百分点）。
+ * 表分段之后「每级成长」不再是常数，真正取值走 `growth.js#playerGrowthAtLevel`；
+ * 这个名字留着给展示与旧断言用，值必须与 `GROWTH_BUDGET.player.perLevel[0]` 一致
+ * （`tests/unit/growth.test.js` 守这条）。
+ */
+export const GROWTH_PER_LEVEL = Object.freeze({
+  maxHp: GROWTH_BUDGET.player.perLevel[0].maxHp,
+  attack: GROWTH_BUDGET.player.perLevel[0].attack,
+  defense: GROWTH_BUDGET.player.perLevel[0].defense,
+  crit: GROWTH_BUDGET.player.perLevel[0].crit,
 });
 
 /** 战斗胜利经验：每只怪物基础值 × 层数缩放，精英双倍。 */
@@ -270,26 +335,15 @@ export const RARITIES = Object.freeze([
 ]);
 
 /**
- * 掉落品质随层数抬升的曲线（P0）。修的是一个真 bug：
- * 旧 `rollRarityIndex` 只用层数**压制低档**，高档权重是常数 ⇒
- * 「层数只让你更少捡到破烂，并不会让你更容易捡到传说」，
- * 40 层以后装备成长基本停住 —— demo/scale-curve.html 里第 40 层边际鼓包的代码根源。
- *
- * 语义：
- *  - 低两档（破损/普通）按 `lowSuppressStep` 逐段压制（沿用旧值，那部分行为不变）
- *  - 高档（下标 ≥2）按 `(1 + tierLift) ** (progress * (index - 1))` 抬升，
- *    档越高抬得越狠 —— 于是深度同时买断低档与打开高档
- *  - 第 `rampFloor` 层吃满 progress=1，之后继续按同一速率涨到 `progressCap`
- *    （无尽段还有 100+ 层可爬，不能一进无尽就把曲线钉死）
+ * 掉落品质曲线（P0）。它现在是 `GROWTH_BUDGET.loot` 的别名 ——
+ * 同一个对象，不是第二份定义（两个名字各自演化过一次，那正是本包要避免的事）。
+ * 语义：低两档按 `lowSuppressStep` 逐段压制（沿用旧值），高档（下标 ≥2）按
+ * `(1 + tierLift) ** (progress * (index - 1))` 抬升，第 `rampFloor` 层吃满 progress=1，
+ * 之后按同一速率涨到 `progressCap`（无尽段还有 100+ 层可爬，不能一进无尽就钉死）。
+ * 修的是一个真 bug：旧实现只压制低档、高档权重是常数 ⇒ 「层数只让你更少捡到破烂，
+ * 并不会让你更容易捡到传说」，40 层以后装备成长停住。
  */
-export const LOOT_RARITY_CURVE = Object.freeze({
-  lowSuppressFloors: 4,
-  lowSuppressStep: 0.08,
-  lowSuppressCap: 0.9,
-  rampFloor: 45,
-  tierLift: 0.8,
-  progressCap: 2,
-});
+export const LOOT_RARITY_CURVE = GROWTH_BUDGET.loot;
 
 /** 装备词缀。注意：只有这四项，与伤害公式直接挂钩。 */
 export const AFFIXES = Object.freeze([

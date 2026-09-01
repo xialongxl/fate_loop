@@ -8,6 +8,7 @@
 import { encounterStream } from '../prng.js';
 import { createEntity } from '../entity.js';
 import { FACTION } from '../constants.js';
+import { monsterScaleAtFloor } from '../growth.js';
 import { ContractViolationError } from '../../utils/invariant.js';
 
 /**
@@ -49,13 +50,15 @@ export function pickEncounter({ seed, floorNumber, nodeId, tier, encounters }) {
 /**
  * 按遭遇模板实例化怪物实体。
  *
- * 层数缩放：每层 +12% HP、+8% 攻击，向下取整。缩放是确定性的纯函数，
- * 不消费随机数 —— 属性浮动才消费（下方 variance）。
+ * 层数缩放：读 `GROWTH_BUDGET.monster`（默认表下就是现状的 +12% HP / +8% 攻击，
+ * 向下取整）。以前这两个系数是本文件里硬编码的字面量 —— 它就是「没人总账」
+ * 的现场之一：玩家侧长得多快写在 constants，怪侧长得多快写在这里，
+ * 两边各自“看着对”，合起来到 40 层就坡了。P3 把它们收进同一张表。
+ * 缩放仍是确定性的纯函数，不消费随机数 —— 属性浮动才消费（下方 variance）。
  */
 export function instantiateMonsters({ encounter, monsters, floorNumber, seed, nodeId }) {
   const rng = encounterStream(seed, floorNumber, `${nodeId}:stats`);
-  const hpScale = 1 + (floorNumber - 1) * 0.12;
-  const atkScale = 1 + (floorNumber - 1) * 0.08;
+  const scale = monsterScaleAtFloor(floorNumber);
 
   return encounter.monsterIds.map((monsterId, index) => {
     const template = monsters.get(monsterId);
@@ -70,9 +73,9 @@ export function instantiateMonsters({ encounter, monsters, floorNumber, seed, no
       id: `${monsterId}#${index}`,
       name: template.name,
       faction: FACTION.MONSTER,
-      maxHp: Math.max(1, Math.floor(template.maxHp * hpScale * variance)),
-      attack: Math.max(0, Math.floor(template.attack * atkScale * variance)),
-      defense: template.defense,
+      maxHp: Math.max(1, Math.floor(template.maxHp * scale.hp * variance)),
+      attack: Math.max(0, Math.floor(template.attack * scale.attack * variance)),
+      defense: Math.max(0, Math.floor(template.defense * scale.defense)),
       gcdSequence: [...template.gcdSequence],
       ogcdSlots: template.ogcdSlots.map((s) => ({ ...s })),
     });

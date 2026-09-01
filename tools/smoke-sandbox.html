@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<!--
+  一次性冒烟（不属于 ui:audit 的常规屏）：在**真浏览器 + dev server** 下装一个第三方包，
+  然后让 createApp 走完整的沙箱路径，看 QuickJS 的 wasm 到底能不能实例化。
+
+  为什么要它：沙箱测试全在 Node 里跑（vitest），而 wasm 的定位方式在 Node 与浏览器
+  是两套解析路径 —— Vite dev 的依赖预打包正是死在浏览器这一侧（.wasm 没被搬进
+  node_modules/.vite/deps/）。所以浏览器路径需要浏览器来验。
+
+  用法（npm run mod:smoke）：
+    /tools/smoke-sandbox.html  →  页面里写一个 <script id="smoke-json">，结果 JSON。
+-->
+<html lang="zh">
+  <head><meta charset="utf-8" /><title>sandbox smoke</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      const result = { booted: false, sandboxError: null, loaded: [], packCount: 0, error: null };
+      try {
+        const { PackService } = await import('/src/persistence/packs.js');
+        const packs = await new PackService().init();
+        await packs.install({
+          id: 'smoke.app',
+          version: '1.0.0',
+          title: '冒烟包',
+          files: {
+            'main.js': `
+import { begin, family, skill, SKILL_TYPE } from 'fate';
+begin({ id: 'smoke.app', version: '1.0.0' });
+family({ id: 'smoke', label: '烟' });
+skill({ id: 'smoke.app.hit', name: '烟击', type: SKILL_TYPE.GCD, gcdCost: 2.0,
+  execute: (ctx, self, targets) => { for (const t of targets) ctx.damage({ sourceId: self.id, targetId: t.id, amount: 120 }); } });
+`,
+          },
+        });
+        const list = await packs.list();
+        result.packCount = list.length;
+
+        const { createApp } = await import('/src/main.js');
+        const app = await createApp({ root: document.querySelector('#app'), seed: 20240101, packs });
+        result.booted = true;
+        result.sandboxError = app.packReport.sandboxError;
+        result.loaded = app.packReport.loaded.map((r) => r.id);
+        result.hasSkill = app.pool.skills.has('smoke.app.hit');
+      } catch (error) {
+        result.error = String(error?.message ?? error);
+      }
+      const out = document.createElement('script');
+      out.type = 'application/json';
+      out.id = 'smoke-json';
+      out.textContent = JSON.stringify(result);
+      document.body.append(out);
+    </script>
+  </body>
+</html>

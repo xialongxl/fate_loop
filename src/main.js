@@ -115,6 +115,9 @@ export const DEFAULT_OGCD_SLOTS = Object.freeze([
  * @param {Array} [options.modules] 注入模组条目（绕过 import.meta.glob，测试用）
  * @param {SaveService} [options.saveService]
  * @param {object} [options.audio] 音频 sink（测试传静默实现）
+ * @param {Function} [options.installPacks] 覆盖 `installSandboxPacks`（**只给测试用**：
+ *   真实装配走惰性 import，不把 227KB wasm 拖进主包；而"沙箱整个起不来"
+ *   这条路径在正常环境里根本触发不了，没这个口子就测不到）
  */
 export async function createApp({
   root = document.querySelector('#app'),
@@ -123,6 +126,7 @@ export async function createApp({
   saveService = new SaveService(),
   audio = new HowlerAudio(),
   packs,
+  installPacks = null,
 } = {}) {
   if (root === null || root === undefined) {
     throw new Error('createApp 需要挂载点（#app）');
@@ -169,30 +173,71 @@ export async function createApp({
    *     QuickJS wasm 都不该下（主包现在才 28KB）。
    */
   const packService = packs === undefined ? new PackService() : packs;
-  const packReport = { ok: [], failed: [], overrides: [], loaded: [], broken: [] };
+  const packReport = {
+    ok: [],
+    failed: [],
+    overrides: [],
+    loaded: [],
+    broken: [],
+    /** 沙箱本体没起来（wasm 加载失败等）时的原因；null = 没出这事 */
+    sandboxError: null,
+    /** 因沙箱没起来而**本次未生效**的已启用包数 */
+    blockedPacks: 0,
+  };
+  /**
+   * 整段包在 try 里 —— 这一条是真实事故写下来的，不是臆想的防御：
+   * dev 下 Vite 预打包不把 `.wasm` 搬进 `node_modules/.vite/deps/`，而 QuickJS
+   * 胶水按 `new URL('emscripten-module.wasm', import.meta.url)` 定位它 ⇒ 要不到 ⇒ 404，
+   * 而 SPA fallback 递回来的是 index.html ⇒ `WebAssembly.instantiate` 报
+   * "expected magic word 00 61 73 6d, found 3c 21 64 6f"（`<!do`）⇒ 异常冒到
+   * createApp ⇒ **白屏**。后果比"包没生效"严重一个量级：
+   * 玩家连进模组屏卸掉它的入口都没有。
+   *
+   * 「第三方包不该有让游戏开不了机的权力」是沙箱设计文档自己写的原则，
+   * 那它就得由代码保证，而不是由"包恰好写得规范"保证。惰性 import 也同上：
+   * 惰性只保证不拖体积，不保证不炸。
+   */
   if (packService !== null) {
-    const enabled = await packService.loadEnabled();
-    packReport.broken = enabled.broken;
-    if (enabled.entries.length > 0) {
-      const { installSandboxPacks } = await import('./core/mods/sandbox/index.js');
-      const result = await installSandboxPacks({
-        entries: enabled.entries,
-        pool,
-        engine,
-        clock: () => performance.now(),
-      });
-      packReport.ok = result.ok;
-      packReport.failed = result.failed;
-      packReport.overrides = result.overrides;
-      packReport.loaded = result.loaded;
-      sandboxHost = result.host;
+    let enabledCount = 0;
+    try {
+      const enabled = await packService.loadEnabled();
+      packReport.broken = enabled.broken;
+      enabledCount = (enabled.entries ?? []).length;
+      if (enabledCount > 0) {
+        const installer =
+          installPacks ??
+          (await import('./core/mods/sandbox/index.js')).installSandboxPacks;
+        const result = await installer({
+          entries: enabled.entries,
+          pool,
+          engine,
+          clock: () => performance.now(),
+        });
+        packReport.ok = result.ok;
+        packReport.failed = result.failed;
+        packReport.overrides = result.overrides;
+        packReport.loaded = result.loaded;
+        sandboxHost = result.host;
+      }
+    } catch (error) {
+      packReport.sandboxError = String(error?.message ?? error);
+      packReport.blockedPacks = enabledCount;
+      // 沙箱起不来 ⇒ 内容池退回纯官方。但**存档命名空间仍按"装了包"走**：
+      // 装包玩家的档存在隔离库里，跟着"加载成败"切库就会表现为"档不见了"。
+      // 读那份档会撞内容指纹校验并弹确认 —— 那是响的，不是静默的。
     }
   }
 
   await audio.init?.();
   engine.setAudioSinks({ live: audio, silent: nullAudio });
 
-  const storageInfo = await saveService.init({ modded: packReport.loaded.length > 0 });
+  const storageInfo = await saveService.init({
+    // 包真生效 → 隔离库；包想生效但沙箱挂了 → 仍走隔离库（否则装包玩家会觉得档丢了）。
+    // blockedPacks 为 0 时不能切：那是「根本没装包」，切库反而会把 vanilla 存档藏起来。
+    modded:
+      packReport.loaded.length > 0 ||
+      (packReport.sandboxError !== null && packReport.blockedPacks > 0),
+  });
   const flow = new GameFlow({ store, engine, pool, saveService, audio });
 
   /**
@@ -1461,6 +1506,14 @@ export async function createApp({
   }
   if (packReport.broken.length > 0) {
     notify(`有 ${packReport.broken.length} 个包的源文件读不回来，可卸载后重装`, 'warn');
+  }
+  if (packReport.sandboxError !== null) {
+    // 响，不静默："安静地没效果"是本项目最难查的一类 bug。
+    notify(
+      `沙箱没能启动，${packReport.blockedPacks} 个包本次未生效（原因见模组屏）。` +
+        '官方内容不受影响，游戏可以照常玩',
+      'danger',
+    );
   }
   // 设置屏页尾显示完整原因：头部那一行放不下"为什么降级"
   screens[SCREEN.SETTINGS].setStorageInfo?.(

@@ -29,6 +29,23 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  /**
+   * QuickJS 的 wasm 变体不能进依赖预打包（实测过坑）。
+   *
+   * 它的胶水用 `new URL('emscripten-module.wasm', import.meta.url)` 定位 wasm，
+   * 而 esbuild 预打包只把 .js 摄进 `node_modules/.vite/deps/`，**不会搬那个 503KB 的
+   * 兄弟文件** ⇒ dev 下请求 `.vite/deps/emscripten-module.wasm` 要不到 ⇒ 被 SPA
+   * fallback 挡成 index.html ⇒ `WebAssembly.instantiate` 报
+   * “expected magic word 00 61 73 6d, found 3c 21 64 6f”（`<!do`）。
+   * 排除之后浏览器直接从真实包目录拿 ESM，wasm 就在它旁边。
+   *
+   * 这个坑**只在 dev**：`vite build` 走 Rollup，它认 `new URL(字面量, import.meta.url)`
+   * 并把 wasm 发进 dist/assets —— 所以上了线一切正常，而本地装包直接白屏。
+   * 另一道防线在 main.js：就算 wasm 真的拿不到，游必须能开（沙箱失败不杀进程）。
+   */
+  optimizeDeps: {
+    exclude: ['@jitl/quickjs-wasmfile-release-sync', 'quickjs-emscripten-core', 'quickjs-emscripten'],
+  },
   build: {
     target: 'es2022',
     sourcemap: true,

@@ -195,8 +195,19 @@ export function createModsScreen({
     const report = getReport?.() ?? { ok: [], failed: [], overrides: [], broken: [] };
     const loadedIds = new Set((report.ok ?? []).map((r) => r.id));
 
-    // ---- 顶部告警：装不上、读不回、覆盖了官方内容，三件事各说一条 ----
+    // ---- 顶部告警：沙箱本体没起来、装不上、读不回、覆盖了官方内容，四件事各说一条 ----
     const alerts = [];
+    if (typeof report.sandboxError === 'string' && report.sandboxError !== '') {
+      // 比下面那几条更重：它说的是"一个包没跑起来"还是"整个沙箱没起来"。
+      // 不写清这一点，玩家会去改包，而真正坏的是环境（wasm 拿不到）。
+      alerts.push({
+        kind: 'danger',
+        text:
+          `沙箱本体没能启动：${escapeHtml(report.sandboxError)}。` +
+          `所以 ${report.blockedPacks} 个已启用的包本次全都没生效（内容池里只有官方内容）。` +
+          '游戏可照常玩；这是环境问题，不是某个包写坏了 —— 卸载或重启 dev 服务再试。',
+      });
+    }
     for (const failure of report.failed ?? []) {
       alerts.push({
         kind: 'danger',

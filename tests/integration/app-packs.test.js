@@ -52,7 +52,7 @@ function modulesWithExample() {
   ];
 }
 
-async function boot(packs, seed = 4242, modules = modulesWithExample()) {
+async function boot(packs, seed = 4242, modules = modulesWithExample(), installPacks = null) {
   document.body.innerHTML = '<div id="app"></div>';
   return createApp({
     root: document.querySelector('#app'),
@@ -60,6 +60,7 @@ async function boot(packs, seed = 4242, modules = modulesWithExample()) {
     modules,
     audio: nullAudio,
     packs,
+    installPacks,
   });
 }
 
@@ -117,6 +118,55 @@ skill({ id: 'poc.broken.a', type: 'GCD', gcdCost: 2.4, execute: () => {} });
     expect(app.packReport.failed[0].id).toBe('poc.broken');
     expect(app.pool.skills.has('poc.broken.a')).toBe(false);
     expect(app.router.current).toBe(SCREEN.MAIN_MENU);
+    app.destroy();
+  });
+
+  /**
+   * 沙箱**本体**起不来时游戏必须能开 —— 这条是真实事故补的回归。
+   *
+   * 事故现场：dev 下 Vite 不把 .wasm 搬进预打包目录，QuickJS 实例化抛
+   * "expected magic word"，而 main.js 里这段没有 try —— 异常一路冒到
+   * createApp，玩家看到的是白屏加一行“启动失败”，连进模组屏卸包的机会都没有。
+   * 上面那条“包坏掉”只测了**单包隔离**（installSandboxPacks 自接接住），
+   * 根本测不到“整个沙箱没起来”这一档，所以这里拿注入口子直接报假它。
+   */
+  it('沙箱本体起不来时：游戏照样开、原因说得出、卸包入口仍在', async () => {
+    const packs = await new PackService().init();
+    await packs.install({ ...PACK, title: '跑不起来的包' });
+
+    const app = await boot(
+      packs,
+      31337,
+      modulesWithExample(),
+      async () => {
+        throw new Error(
+          'Aborted(CompileError: WebAssembly.instantiate(): expected magic word 00 61 73 6d, found 3c 21 64 6f)',
+        );
+      },
+    );
+
+    // 1) 开起来了，而且停在主菜单
+    expect(app.router.current).toBe(SCREEN.MAIN_MENU);
+    // 2) 不是“静默没效果”：原因与影响面都记在报告里
+    expect(app.packReport.sandboxError).toContain('expected magic word');
+    expect(app.packReport.blockedPacks).toBe(1);
+    expect(app.packReport.loaded).toHaveLength(0);
+    expect(app.pool.skills.has('poc.app.nova')).toBe(false);
+    // 3) 关键：存档命名空间仍按“装了包”走。跟着加载成败切库的话，
+    //    装包玩家下次看到的是“进度不见了”—— 那比白屏更难解释。
+    expect(app.saveService.modded).toBe(true);
+
+    // 4) 模组屏把原因写上脸，并且仍有卸包按钮（否则玩家出不去这个循环）
+    app.router.go(SCREEN.MODS);
+    app.screens[SCREEN.MODS].onEnter();
+    for (let i = 0; i < 3; i += 1) await new Promise((r) => setTimeout(r, 0));
+    const alerts = [...app.screens[SCREEN.MODS].element.querySelectorAll('.mod-alert')];
+    expect(alerts.some((n) => n.textContent.includes('沙箱本体没能启动'))).toBe(true);
+    expect(alerts.some((n) => n.textContent.includes('expected magic word'))).toBe(true);
+    expect(
+      app.screens[SCREEN.MODS].element.querySelector('[data-act="remove"]'),
+      '卸包入口必须可达，不然玩家永远退不出这个循环',
+    ).not.toBeNull();
     app.destroy();
   });
 

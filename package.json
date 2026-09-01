@@ -16,7 +16,8 @@
     "mod:poc": "node tools/mod-sandbox-poc.mjs",
     "deploy:check": "node tools/deploy-check.mjs",
     "unlock:report": "vite-node tools/unlock-table-report.mjs",
-    "growth:report": "vite-node tools/growth-budget-report.mjs"
+    "growth:report": "vite-node tools/growth-budget-report.mjs",
+    "mod:smoke": "node tools/smoke-sandbox.mjs"
   },
   "dependencies": {
     "fflate": "^0.8.3",

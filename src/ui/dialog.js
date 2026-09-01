@@ -71,13 +71,14 @@ export function createDialog(container) {
     return box;
   }
 
-  function open(html, { onClose = null, closeOnBackdrop: backdrop = true, wide = false, escapable: esc = true, eyebrow = null } = {}) {
+  function open(html, { onClose = null, closeOnBackdrop: backdrop = true, wide = false, xwide = false, escapable: esc = true, eyebrow = null } = {}) {
     onCloseHook = onClose;
     closeOnBackdrop = backdrop;
     escapable = esc;
     previousFocus = document.activeElement;
     container.hidden = false;
-    container.innerHTML = `<div class="dialog-box ${wide ? 'is-wide' : ''}" role="dialog" aria-modal="true"></div>`;
+    // xwide 只给“看源码”这类需要横向空间的内容；商店/熔炼编辑器用 wide（720px）
+    container.innerHTML = `<div class="dialog-box ${xwide ? 'is-xwide' : wide ? 'is-wide' : ''}" role="dialog" aria-modal="true"></div>`;
     const box = container.querySelector('.dialog-box');
     box.innerHTML = html;
 

@@ -1413,7 +1413,8 @@ export async function createApp({
       notify('这个包的源文件读不回来，建议卸载后重装', 'warn');
       return;
     }
-    const box = dialog.open('', { wide: true });
+    // 源码要横向空间：用 xwide，不跟着商店/编辑器一起收到 720px
+    const box = dialog.open('', { xwide: true });
     const sections = [...loaded.pack.files.entries()]
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
       .map(
